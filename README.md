@@ -7,7 +7,7 @@ Based on [get_secure_storage](https://github.com/gslender/get_secure_storage) by
 gslender, itself a secure version of [GetStorage](https://github.com/jonataslaw/get_storage)
 by Jonny Borges.
 
-- **Encryption:** AES-256-GCM, key derived with PBKDF2-HMAC-SHA256 (600,000
+- **Encryption:** AES-256-GCM, key derived with PBKDF2-HMAC-SHA256 (50,000
   iterations, random salt per container), through BoringSSL
   ([webcrypto](https://pub.dev/packages/webcrypto)) or the browser's WebCrypto.
 - **Compact files:** data is gzip-compressed before encryption; a 15 MB
@@ -28,7 +28,7 @@ dependencies:
   orca_secure_storage:
     git:
       url: https://github.com/aminjoharinia/OrcaSecureStorage.git
-      ref: v2.1.2
+      ref: v2.1.3
 ```
 ### Install it
 
@@ -56,10 +56,15 @@ main() async {
 }
 ```
 ### Password or encryption key
-A `password` is turned into the AES key with PBKDF2 (600,000 iterations,
-about 40 ms per container when it is opened). For fast opening, use a random
-32-byte `encryptionKey` instead and keep it in secure platform storage
-(Keychain, Android Keystore, e.g. with flutter_secure_storage):
+A `password` is turned into the AES key with PBKDF2 (50,000 iterations,
+a few milliseconds per container when it is opened; more on slow phones).
+That is fewer than OWASP's 600,000 for PBKDF2-SHA256, trading resistance to
+password guessing for startup time; a long random password matters more than
+the count. Files written with 600,000 iterations by 2.1.2 and earlier are
+read once with that count and rewritten with 50,000. For fast opening with no
+derivation at all, use a random 32-byte `encryptionKey` instead and keep it
+in secure platform storage (Keychain, Android Keystore, e.g. with
+flutter_secure_storage):
 ```dart
 final key = OrcaSecureStorage.generateKey(); // once; store it securely
 await OrcaSecureStorage.init(encryptionKey: key);
@@ -71,6 +76,15 @@ await OrcaSecureStorage.init(password: 'strongpassword', encryptionKey: key);
 ```
 After that, the key alone opens them. A key alone cannot open files that are
 still protected by the password.
+
+If your app was released with get_secure_storage 1.x, **keep passing the
+password with the key for good**. 1.x files can still turn up after the
+conversion: a user who updates late, or a phone backup from before the update
+restored on a new device. With the key alone, such a container opens empty,
+and the empty `.oss` written then stops the 1.x file from being converted
+later. Passing the password costs nothing when there is no 1.x file: the 1.x
+key is only derived when one is found, and the password's PBKDF2 only runs
+for files written with a password.
 
 `write` returns before the data reaches disk; `await box.flush()` waits until
 it is saved.

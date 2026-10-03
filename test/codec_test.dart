@@ -152,6 +152,52 @@ void main() {
       expect((await codec(password: null).decode(file)).plaintext, plain);
     });
 
+    test('a file with another PBKDF2 count is rewritten with the configured one', () async {
+      StorageCodec withCount(int n) =>
+          StorageCodec(StorageCodecConfig(password: 'pw', kdfIterations: n));
+      final old = await withCount(3000).encode(plain);
+
+      final c = withCount(1000);
+      final doc = await c.decode(old);
+      expect(doc.plaintext, plain);
+      expect(doc.needsRewrite, isTrue, reason: 'written with 3000, configured 1000');
+
+      // The rewrite gets a new salt and the configured count, and the key
+      // derived for the old file is not reused for it.
+      final rewritten = await c.encode(plain);
+      final again = await withCount(1000).decode(rewritten);
+      expect(again.plaintext, plain);
+      expect(again.needsRewrite, isFalse);
+      expect(() => withCount(1000).decode(old), returnsNormally);
+    });
+
+    test('50,000 PBKDF2 iterations by default', () {
+      expect(const StorageCodecConfig().kdfIterations, 50000);
+    });
+
+    test('the 1.x key is derived exactly as 1.x did', () async {
+      // The 1.x constructor, kept verbatim.
+      const password = 'p@ss w0rd!';
+      final pbkdf2 = Pbkdf2(macAlgorithm: Hmac.sha256(), iterations: 1000, bits: 128);
+      final old = await pbkdf2.deriveKeyFromPassword(
+          password: password, nonce: password.runes.toList().reversed.toList());
+      expect(await deriveLegacyKey(password), await old.extractBytes());
+    });
+
+    test('without legacyKeyBytes, the 1.x key is derived from the password', () async {
+      const password = 'pw';
+      final file = utf8.encode(
+          await encodeLegacyDocument(await deriveLegacyKey(password), plain));
+      for (final key in [null, rawKey]) {
+        final c = StorageCodec(StorageCodecConfig(password: password, keyBytes: key));
+        final doc = await c.decode(file);
+        expect(doc.plaintext, plain);
+        expect(doc.needsRewrite, isTrue);
+      }
+      final wrong = StorageCodec(const StorageCodecConfig(password: 'other'));
+      expect(() => wrong.decode(file), throwsA(isA<StorageRejectedException>()));
+    });
+
     test('1.x envelope without a password is rejected', () async {
       final file = await encodeLegacyDocument(legacyKey, plain);
       expect(() => codec(password: null).decode(utf8.encode(file)),

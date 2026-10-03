@@ -90,26 +90,12 @@ class OrcaSecureStorage {
     _concrete = StorageImpl(key, path);
     _initialData = initialData;
 
-    // _privatekey = privatekey;
     initStorage = Future<bool>(() async {
-      if (password != null) {
-        // The 1.x key, kept so 1.x files can be read and converted. Current
-        // files use AES-256-GCM with a key derived in the background isolate.
-        algorithm = AesCtr.with128bits(macAlgorithm: Hmac.sha256());
-        final pbkdf2 = Pbkdf2(
-          macAlgorithm: Hmac.sha256(),
-          iterations: 1000, // 1000 iterations
-          bits: 128, // 256 bits = 32 bytes output
-        );
-        secretKey = await pbkdf2.deriveKeyFromPassword(
-          password: password,
-          nonce: password.runes.toList().reversed.toList(),
-        );
-      }
+      // The 1.x key is derived from the password by the codec, in the
+      // background isolate, and only when a 1.x file is actually read.
       await _init(StorageCodecConfig(
         password: password,
         keyBytes: encryptionKey == null ? null : List<int>.of(encryptionKey),
-        legacyKeyBytes: await secretKey?.extractBytes(),
         migrateUnencrypted: migrateUnencrypted,
         nonceField: kNonce,
         macField: kMac,
@@ -133,11 +119,12 @@ class OrcaSecureStorage {
 
   /// Start the storage drive. It's important to use await before calling this API, or side effects will occur.
   ///
-  /// Encryption: pass a [password] (the key is derived with PBKDF2, ~40 ms
-  /// per container when opening), or an [encryptionKey] of 32 random bytes
-  /// you keep in secure platform storage (no derivation, fast to open; see
-  /// [generateKey]). Pass both once to convert password-protected files,
-  /// including 1.x files, to the key; afterwards the key alone is enough.
+  /// Encryption: pass a [password] (the key is derived with PBKDF2, 50,000
+  /// iterations, a few ms per container when opening), or an [encryptionKey]
+  /// of 32 random bytes you keep in secure platform storage (no derivation,
+  /// fast to open; see [generateKey]). Pass both to convert password-protected
+  /// files, including 1.x files, to the key. If 1.x files may still turn up
+  /// (an app released with get_secure_storage 1.x), keep passing both.
   ///
   /// Files from 1.x are detected and rewritten in the current format when
   /// opened. When encrypted, a file that is not encrypted is rejected
@@ -303,10 +290,10 @@ class OrcaSecureStorage {
   /// Start the storage drive. Important: use await before calling this api, or side effects will happen.
   late Future<bool> initStorage;
   Map<String, dynamic>? _initialData;
-  /// The 1.x cipher and key, only used to read 1.x files.
-  @Deprecated('Only used to read 1.x files; storage now uses AES-256-GCM.')
+  /// No longer set: the 1.x key is derived only when a 1.x file is read.
+  @Deprecated('Not set any more; storage uses AES-256-GCM.')
   AesCtr? algorithm;
-  @Deprecated('Only used to read 1.x files; storage now uses AES-256-GCM.')
+  @Deprecated('Not set any more; storage uses AES-256-GCM.')
   SecretKey? secretKey;
 }
 

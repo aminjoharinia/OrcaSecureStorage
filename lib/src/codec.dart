@@ -12,7 +12,7 @@ class StorageCodecConfig {
     this.keyBytes,
     this.legacyKeyBytes,
     this.migrateUnencrypted = false,
-    this.kdfIterations = 600000,
+    this.kdfIterations = 50000,
     this.nonceField = 'nonce',
     this.macField = 'mac',
     this.cipherTextField = 'cipherText',
@@ -29,7 +29,8 @@ class StorageCodecConfig {
   final List<int>? keyBytes;
 
   /// The 1.x AES-128 key (PBKDF2, 1000 iterations), used only to read 1.x
-  /// files before they are rewritten in the current format.
+  /// files before they are rewritten in the current format. When null, it is
+  /// derived from [password] the first time a 1.x file is read.
   final List<int>? legacyKeyBytes;
 
   /// With a password set, accept data that is not encrypted (e.g. a
@@ -37,8 +38,9 @@ class StorageCodecConfig {
   /// been swapped in by anyone able to write the app's files.
   final bool migrateUnencrypted;
 
-  /// PBKDF2 iterations for new files (OWASP 2023 figure for SHA-256). Files
-  /// keep the count they were written with, read from their header.
+  /// PBKDF2 iterations for files written with a password. A file written
+  /// with another count (2.1.2 and earlier used 600,000) is read with the
+  /// count from its header, then rewritten with a new salt and this count.
   final int kdfIterations;
 
   final String nonceField;
@@ -180,11 +182,12 @@ class StorageCodec {
         ..add(_u32(0))
         ..addByte(0);
     } else {
-      if (_salt == null) {
+      if (_salt == null || _iterations != config.kdfIterations) {
         final salt = Uint8List(_saltLength);
         fillRandomBytes(salt);
         _salt = salt;
         _iterations = config.kdfIterations;
+        _key = null; // derived for the old salt; _keyFor must not reuse it
       }
       key = await _keyFor(_salt!, _iterations);
       header
@@ -221,6 +224,8 @@ class StorageCodec {
     final encrypted = flags & _flagEncrypted != 0;
     // A password-protected file opened with a key as well: convert it.
     var toRawKey = false;
+    // Written with another PBKDF2 count: rewrite it with the configured one.
+    var otherCount = false;
     List<int> payload;
     if (encrypted) {
       if (!config.encrypted) {
@@ -240,6 +245,7 @@ class StorageCodec {
           }
           key = await _keyFor(salt, iterations);
           toRawKey = config.keyBytes != null;
+          otherCount = iterations != config.kdfIterations;
         case _kdfRawKey:
           if (config.keyBytes == null) {
             throw StorageRejectedException('file uses an encryption key; none was given');
@@ -269,7 +275,7 @@ class StorageCodec {
       payload = gunzip(payload);
     }
     return DecodedDocument(utf8.decode(payload),
-        needsRewrite: encrypted != config.encrypted || toRawKey);
+        needsRewrite: encrypted != config.encrypted || toRawKey || otherCount);
   }
 
   // ---- Change log --------------------------------------------------------
@@ -368,6 +374,18 @@ class StorageCodec {
   static List<int> _logAad(Uint8List fingerprint, int seq) =>
       [..._logMagic, ...fingerprint, ..._u32(seq)];
 
+  List<int>? _derivedLegacyKey;
+
+  /// The 1.x key: given in the config, or derived from the password the
+  /// first time a 1.x file is read (and then kept for its backup file).
+  Future<List<int>?> _legacyKey() async {
+    final given = config.legacyKeyBytes;
+    if (given != null) return given;
+    final password = config.password;
+    if (password == null) return null;
+    return _derivedLegacyKey ??= await deriveLegacyKey(password);
+  }
+
   // 1.x files are UTF-8 JSON: either the `{nonce, mac, cipherText}` hex
   // envelope (AES-128-CTR + HMAC-SHA256) or the plain container.
   Future<String> _decodeLegacy(String content) async {
@@ -385,7 +403,7 @@ class StorageCodec {
       return content;
     }
 
-    final key = config.legacyKeyBytes;
+    final key = await _legacyKey();
     if (key == null) {
       throw StorageRejectedException('1.x encrypted file; pass the password to read it');
     }
@@ -407,6 +425,20 @@ class StorageCodec {
 
 legacy.AesCtr _legacyAlgorithm() =>
     legacy.AesCtr.with128bits(macAlgorithm: legacy.Hmac.sha256());
+
+/// The 1.x AES-128 key: PBKDF2-HMAC-SHA256, 1000 iterations, the reversed
+/// password as salt.
+Future<List<int>> deriveLegacyKey(String password) async {
+  final key = await legacy.Pbkdf2(
+    macAlgorithm: legacy.Hmac.sha256(),
+    iterations: 1000,
+    bits: 128,
+  ).deriveKeyFromPassword(
+    password: password,
+    nonce: password.runes.toList().reversed.toList(),
+  );
+  return key.extractBytes();
+}
 
 /// Writes a 1.x hex envelope. Only used to test reading old files.
 Future<String> encodeLegacyDocument(List<int> keyBytes, String plaintext) async {

@@ -1,3 +1,9 @@
+## [2.1.3]
+- **Faster start with a password:** the 1.x key (PBKDF2, 1,000 iterations, pure Dart) is no longer derived on the UI isolate every time a container is opened with a password. It is derived in the background isolate, and only when a 1.x file is actually read. Saves about 3.5 ms per container on a desktop CPU, more on phones. See [LEGACY_KEY_CHANGES.md](LEGACY_KEY_CHANGES.md).
+- **PBKDF2 iterations lowered from 600,000 to 50,000** for files written with a password: opening such a container takes a few milliseconds instead of ~40 ms (more on phones). Existing files keep working: they are read with the count stored in their header, then rewritten once with a new salt and 50,000 iterations. 50,000 is below OWASP's 600,000 for PBKDF2-SHA256; use a long random password, or an `encryptionKey`.
+- The deprecated `algorithm` and `secretKey` fields are no longer set (they are now always null).
+- README: apps migrating from 1.x should keep passing the password together with an `encryptionKey`.
+
 ## [2.1.2]
 - README: corrected memory use. The decoded objects on the UI isolate are the large copy (about 5× the JSON); the worker's JSON text is about 1× (up to 2× with non-Latin-1 strings). Documents the short peaks while writing a snapshot and opening a container. No code changes.
 
