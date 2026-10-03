@@ -1,3 +1,6 @@
+## [2.1.2]
+- README: corrected memory use. The decoded objects on the UI isolate are the large copy (about 5× the JSON); the worker's JSON text is about 1× (up to 2× with non-Latin-1 strings). Documents the short peaks while writing a snapshot and opening a container. No code changes.
+
 ## [2.1.1]
 - **Fix:** a value that cannot be converted to JSON (e.g. an object without `toJson`) no longer blocks every later save of its container. `write` and `writeInMemory` now convert the value straight away and throw a `JsonUnsupportedObjectError` without storing it. The JSON made there is reused for the save, so values are not encoded twice. A value is saved as it was when written; call `save()` after changing it in place.
 - `flush()` now retries a failed save itself (before, only the next write did) and throws only if saving still fails.
