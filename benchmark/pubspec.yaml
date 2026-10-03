@@ -1,0 +1,25 @@
+name: storage_comparison
+description: Compares this GetSecureStorage fork with its earlier version, gslender/get_secure_storage and jonataslaw/get_storage.
+publish_to: none
+
+environment:
+  sdk: ">=3.3.3 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  path_provider: ^2.1.2
+  # This repo (step 1: background writer, incremental encoding, atomic writes).
+  orca_secure_storage:
+    path: ..
+  # Created by tool/setup.sh.
+  get_secure_storage_fork_v1:
+    path: third_party/get_secure_storage_fork_v1
+  get_secure_storage_gslender:
+    path: third_party/get_secure_storage_gslender
+  get_storage:
+    path: third_party/get_storage
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

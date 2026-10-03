@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:get_secure_storage/get_secure_storage.dart';
+import 'package:orca_secure_storage/orca_secure_storage.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await GetSecureStorage.init(password: 'strongpassword');
+  await OrcaSecureStorage.init(password: 'strongpassword');
   runApp(const App());
 }
 
@@ -15,7 +15,7 @@ class App extends StatefulWidget {
 }
 
 class _AppState extends State<App> {
-  final box = GetSecureStorage();
+  final box = OrcaSecureStorage();
 
   @override
   void initState() {
@@ -37,7 +37,7 @@ class _AppState extends State<App> {
     return MaterialApp(
       theme: isDark ? ThemeData.dark() : ThemeData.light(),
       home: Scaffold(
-        appBar: AppBar(title: const Text("GetSecureStorage")),
+        appBar: AppBar(title: const Text("OrcaSecureStorage")),
         body: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [

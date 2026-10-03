@@ -1,22 +1,29 @@
-# GetSecureStorage
+# OrcaSecureStorage
 
-With WASM Support
+An encrypted, fast key-value store for Flutter, with WASM support. The data
+lives in memory and is saved to disk after each change.
 
-A cryptography Secure version of GetStorage originally written by Jonny Borges (https://github.com/jonataslaw/get_storage).
+Based on [get_secure_storage](https://github.com/gslender/get_secure_storage) by
+gslender, itself a secure version of [GetStorage](https://github.com/jonataslaw/get_storage)
+by Jonny Borges.
 
-GetSecureStorage is a secure, fast, extra light and synchronous key-value in memory, which backs up data to disk at each operation. It is written entirely in Dart and is based on the Cryptography dart package.
+- **Encryption:** AES-256-GCM, key derived with PBKDF2-HMAC-SHA256 (600,000
+  iterations, random salt per container), through BoringSSL
+  ([webcrypto](https://pub.dev/packages/webcrypto)) or the browser's WebCrypto.
+- **Compact files:** data is gzip-compressed before encryption; a 15 MB
+  container takes about 2 MB on disk.
+- **Smooth UI:** compression, encryption and file writes run on a background
+  isolate; a write only encodes the keys that changed.
+- **Crash-safe:** files are written to a temp file and renamed into place.
 
-The cryptography library used is https://pub.dev/packages/cryptography
-
-The algorithm used is 128bit AES-CTR with MAC sha256
-
-Supports Android, iOS, Web, Mac, Linux, and Windows. 
-Can store String, int, double, Map and List
+Supports Android, iOS, Web, Mac, Linux, and Windows. Can store String, int,
+double, Map and List. Requires Dart 3.10 (Flutter 3.38) or later.
 
 ### Add to your pubspec:
 ```
 dependencies:
-  get_secure_storage:
+  orca_secure_storage:
+    git: https://github.com/aminjoharinia/OrcaSecureStorage
 ```
 ### Install it
 
@@ -33,29 +40,49 @@ $  flutter packages get
 Now in your `Dart` code, you can use: 
 
 ````dart
-import 'package:get_secure_storage/get_secure_storage.dart';
+import 'package:orca_secure_storage/orca_secure_storage.dart';
 ````
 
 ### Initialize storage driver with await:
 ```dart
 main() async {
-  await GetSecureStorage.init(password: 'strongpassword');
+  await OrcaSecureStorage.init(password: 'strongpassword');
   runApp(App());
 }
 ```
-#### use GetSecureStorage through an instance or use directly `GetSecureStorage().read('key')`
+`write` returns before the data reaches disk.
+
+### Files and migration
+Each container is stored as `<container>.oss` with a backup in
+`<container>.ossbak`.
+
+When a container has no `.oss` file yet, its files from get_secure_storage 1.x
+or GetStorage (`<container>.gs` / `<container>.bak`) are read once, written as
+`.oss`, and left untouched. The default container also picks up the old
+default `GetSecureStorage.gs`. get_secure_storage 1.x cannot read `.oss` files.
+
+With a password, a file that is not encrypted (for example one written by
+GetStorage or without a password) is not loaded. To load such a file once and
+encrypt it, pass `migrateUnencrypted: true`:
 ```dart
-final box = GetSecureStorage(password: 'strongpassword');
+await OrcaSecureStorage.init(password: 'strongpassword', migrateUnencrypted: true);
+```
+A `.oss` file that cannot be read (wrong password, tampering) is kept as
+`<container>.oss.rejected` before the container starts empty.
+
+#### use OrcaSecureStorage through an instance or use directly `OrcaSecureStorage().read('key')`
+```dart
+final box = OrcaSecureStorage(password: 'strongpassword');
 ```
 #### To write information you must use `write` :
 ```dart
-box.write('quote', 'GetSecureStorage is the best');
+box.write('quote', 'OrcaSecureStorage is the best');
 ```
 
 #### To read values you use `read`:
 ```dart
 print(box.read('quote'));
-// out: GetSecureStorage is the best
+// out: OrcaSecureStorage is the best
 
 ```
 #### To remove a key, you can use `remove`:
@@ -91,18 +118,18 @@ box.erase();
 #### If you want to create different containers, simply give it a name. You can listen to specific containers, and also delete them.
 
 ```dart
-GetSecureStorage g = GetSecureStorage(container:'MyStorage', password: 'strongpassword');
+OrcaSecureStorage g = OrcaSecureStorage(container:'MyStorage', password: 'strongpassword');
 ```
 
 #### To initialize specific container:
 ```dart
-await GetSecureStorage.init(container:'MyStorage', password: 'strongpassword');
+await OrcaSecureStorage.init(container:'MyStorage', password: 'strongpassword');
 ```
 
 ## SharedPreferences Implementation
 ```dart
 class MyPref {
-  static final _otherBox = () => GetSecureStorage(container:'MyPref', password: 'strongpassword');
+  static final _otherBox = () => OrcaSecureStorage(container:'MyPref', password: 'strongpassword');
 
   final username = ''.val('username');
   final age = 0.val('age');

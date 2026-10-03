@@ -23,7 +23,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  get_secure_storage:
+  orca_secure_storage:
     path: ../
   path_provider: 
   get:

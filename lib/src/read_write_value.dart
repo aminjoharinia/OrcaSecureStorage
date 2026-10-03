@@ -1,6 +1,6 @@
-import 'package:get_secure_storage/src/storage_impl.dart';
+import 'package:orca_secure_storage/src/storage_impl.dart';
 
-typedef StorageFactory = GetSecureStorage Function();
+typedef StorageFactory = OrcaSecureStorage Function();
 
 class ReadWriteValue<T> {
   final String key;
@@ -15,7 +15,7 @@ class ReadWriteValue<T> {
     //  this.encoder,
   ]);
 
-  GetSecureStorage _getRealBox() => getBox?.call() ?? GetSecureStorage();
+  OrcaSecureStorage _getRealBox() => getBox?.call() ?? OrcaSecureStorage();
 
   T get val => _getRealBox().read(key) ?? defaultValue;
   set val(T newVal) => _getRealBox().write(key, newVal);

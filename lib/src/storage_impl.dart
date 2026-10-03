@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:get/utils.dart';
 
+import 'codec.dart';
 import 'sdk/flutter.dart' if (dart.library.ui) 'sdk/dart.dart';
 import 'storage/html.dart' if (dart.library.io) 'storage/io.dart';
 import 'value.dart';
@@ -11,35 +11,48 @@ import 'value.dart';
 typedef VoidCallback = void Function();
 typedef ValueSetter<T> = void Function(T value);
 
-/// Instantiate GetSecureStorage to access storage driver apis
-class GetSecureStorage {
+/// Instantiate OrcaSecureStorage to access storage driver apis
+class OrcaSecureStorage {
   static String kNonce = 'nonce';
   static String kMac = 'mac';
   static String kCipherText = 'cipherText';
 
-  factory GetSecureStorage(
-      {String container = 'GetSecureStorage',
+  /// The container used when none is given.
+  static const String defaultContainer = 'OrcaSecureStorage';
+
+  /// The default container's name before the rename. Its files
+  /// (`GetSecureStorage.gs`) are converted when [defaultContainer] has none.
+  static const String legacyDefaultContainer = 'GetSecureStorage';
+
+  factory OrcaSecureStorage(
+      {String container = defaultContainer,
       String? password,
       String? path,
-      Map<String, dynamic>? initialData}) {
+      Map<String, dynamic>? initialData,
+      bool migrateUnencrypted = false}) {
     if (_sync.containsKey(container)) {
       return _sync[container]!;
     } else {
-      final instance =
-          GetSecureStorage._internal(container, path, initialData, password);
+      final instance = OrcaSecureStorage._internal(
+          container, path, initialData, password, migrateUnencrypted);
       _sync[container] = instance;
       return instance;
     }
   }
 
-  GetSecureStorage._internal(String key,
-      [String? path, Map<String, dynamic>? initialData, String? password]) {
+  OrcaSecureStorage._internal(String key,
+      [String? path,
+      Map<String, dynamic>? initialData,
+      String? password,
+      bool migrateUnencrypted = false]) {
     _concrete = StorageImpl(key, path);
     _initialData = initialData;
 
     // _privatekey = privatekey;
     initStorage = Future<bool>(() async {
       if (password != null) {
+        // The 1.x key, kept so 1.x files can be read and converted. Current
+        // files use AES-256-GCM with a key derived in the background isolate.
         algorithm = AesCtr.with128bits(macAlgorithm: Hmac.sha256());
         final pbkdf2 = Pbkdf2(
           macAlgorithm: Hmac.sha256(),
@@ -51,20 +64,37 @@ class GetSecureStorage {
           nonce: password.runes.toList().reversed.toList(),
         );
       }
-      await _init();
+      await _init(StorageCodecConfig(
+        password: password,
+        legacyKeyBytes: await secretKey?.extractBytes(),
+        migrateUnencrypted: migrateUnencrypted,
+        nonceField: kNonce,
+        macField: kMac,
+        cipherTextField: kCipherText,
+      ));
       return true;
     });
   }
 
-  static final Map<String, GetSecureStorage> _sync = {};
+  static final Map<String, OrcaSecureStorage> _sync = {};
 
   final microtask = Microtask();
 
   /// Start the storage drive. It's important to use await before calling this API, or side effects will occur.
+  ///
+  /// Files from 1.x are detected and rewritten in the current format when
+  /// opened. With a [password], a file that is not encrypted is rejected
+  /// (kept aside as `<container>.gs.rejected`) unless [migrateUnencrypted] is
+  /// true, in which case it is loaded and encrypted.
   static Future<bool> init(
-      {String container = 'GetSecureStorage', String? password}) {
+      {String container = defaultContainer,
+      String? password,
+      bool migrateUnencrypted = false}) {
     initImpl();
-    return GetSecureStorage(container: container, password: password)
+    return OrcaSecureStorage(
+            container: container,
+            password: password,
+            migrateUnencrypted: migrateUnencrypted)
         .initStorage;
   }
 
@@ -74,86 +104,8 @@ class GetSecureStorage {
   static deleteContainer(String container, [String? path]) =>
       StorageImpl.deleteContainer(container, path);
 
-  Future<void> _init() async {
-    try {
-      await _concrete.init(_initialData, _encrypt, _decrypt);
-    } catch (err) {
-      rethrow;
-    }
-  }
-
-  List<int> _hexStringToList(String hexString) {
-    List<int> data = [];
-    for (int i = 0; i < hexString.length; i += 2) {
-      int byte = int.parse(hexString.substring(i, i + 2), radix: 16);
-      data.add(byte);
-    }
-    return data;
-  }
-
-  Future<String> _decrypt(String value) async {
-    if (algorithm != null) {
-      final jsonPayload = json.decode(value);
-      if (jsonPayload == null ||
-          !jsonPayload.containsKey(kCipherText) ||
-          !jsonPayload.containsKey(kMac) ||
-          !jsonPayload.containsKey(kNonce)) {
-        return value;
-      }
-
-      if (jsonPayload[kNonce] is! String ||
-          jsonPayload[kCipherText] is! String ||
-          jsonPayload[kMac] is! String) {
-        return '';
-      }
-
-      final secretBox = SecretBox(
-        _hexStringToList(jsonPayload[kCipherText]),
-        nonce: _hexStringToList(jsonPayload[kNonce]),
-        mac: Mac(_hexStringToList(jsonPayload[kMac])),
-      );
-      try {
-        final cleartxt = await algorithm!.decryptString(
-          secretBox,
-          secretKey: secretKey!,
-        );
-        return cleartxt;
-      } catch (e) {
-        rethrow;
-      }
-    } else {
-      return value;
-    }
-  }
-
-  String _listToHexString(List<int> bytes) {
-    return bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
-  }
-
-  Future<String> _encrypt(String value) async {
-    if (algorithm != null) {
-      final secretBox = await algorithm!.encryptString(
-        value,
-        secretKey: secretKey!,
-      );
-      final jsonPayload = {
-        kNonce: _listToHexString(secretBox.nonce),
-        kMac: _listToHexString(secretBox.mac.bytes),
-        kCipherText: _listToHexString(secretBox.cipherText),
-      };
-      return json.encode(jsonPayload);
-    } else {
-      final dynamic jsonPayload = json.decode(value) ?? {};
-      if (jsonPayload.containsKey(kCipherText) ||
-          jsonPayload.containsKey(kMac) ||
-          jsonPayload.containsKey(kNonce)) {
-        jsonPayload.remove(kCipherText);
-        jsonPayload.remove(kMac);
-        jsonPayload.remove(kNonce);
-        return json.encode(jsonPayload);
-      }
-      return value;
-    }
+  Future<void> _init(StorageCodecConfig config) async {
+    await _concrete.init(_initialData, config);
   }
 
   /// Reads a value in your container with the given key.
@@ -222,7 +174,10 @@ class GetSecureStorage {
     return _tryFlush();
   }
 
+  /// Persists the container. Unlike [write], this re-encodes every key, so
+  /// values changed in place (without a `write`) are saved too.
   Future<void> save() async {
+    _concrete.markAllDirty();
     return _tryFlush();
   }
 
@@ -253,7 +208,10 @@ class GetSecureStorage {
   /// Start the storage drive. Important: use await before calling this api, or side effects will happen.
   late Future<bool> initStorage;
   Map<String, dynamic>? _initialData;
+  /// The 1.x cipher and key, only used to read 1.x files.
+  @Deprecated('Only used to read 1.x files; storage now uses AES-256-GCM.')
   AesCtr? algorithm;
+  @Deprecated('Only used to read 1.x files; storage now uses AES-256-GCM.')
   SecretKey? secretKey;
 }
 

@@ -1,39 +1,23 @@
+// jonataslaw/get_storage test/getstorage_test.dart, run against get_storage
+// itself as the reference. Only the path_provider mock differs.
 import 'dart:io';
 
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orca_secure_storage/src/storage_impl.dart';
-import 'package:orca_secure_storage/src/read_write_value.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:get_storage/get_storage.dart';
 
 import 'utils/list_equality.dart';
+import 'utils/mock_path_provider.dart';
 
-void main() async {
+void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  late Directory dir;
+  late GetStorage g;
 
-  late OrcaSecureStorage g;
-
-  const channel = MethodChannel('plugins.flutter.io/path_provider');
-  void setUpMockChannels(MethodChannel channel) {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(
-      channel,
-      (MethodCall? methodCall) async {
-        if (methodCall?.method == 'getApplicationDocumentsDirectory') {
-          return '.';
-        }
-        return null;
-      },
-    );
-  }
-
-  setUpAll(() async {
-    setUpMockChannels(channel);
-  });
+  setUpAll(() => dir = mockDocumentsDirectory('suite_get_storage'));
 
   setUp(() async {
-    await OrcaSecureStorage.init();
-    g = OrcaSecureStorage();
+    await GetStorage.init();
+    g = GetStorage();
     await g.erase();
   });
 
@@ -77,9 +61,8 @@ void main() async {
     await g.write('write', 'abc');
     expect('abc', g.read('write'));
 
-    final file = await _fileDb();
-    file.writeAsStringSync('ndj323e');
-    await OrcaSecureStorage.init();
+    File('${dir.path}/GetStorage.gs').writeAsStringSync('ndj323e');
+    await GetStorage.init();
 
     expect('abc', g.read('write'));
   });
@@ -109,12 +92,12 @@ void main() async {
   });
 
   test('newContainer', () async {
-    final container1 = await OrcaSecureStorage.init(container: 'container1');
-    await OrcaSecureStorage.init(container: 'newContainer');
-    final newContainer = OrcaSecureStorage(container: 'newContainer');
+    final container1 = await GetStorage.init('container1');
+    await GetStorage.init('newContainer');
+    final newContainer = GetStorage('newContainer');
 
     /// Attempting to start a Container that has already started must return the container already created.
-    var container2 = await OrcaSecureStorage.init();
+    var container2 = await GetStorage.init();
     expect(container1 == container2, true);
 
     newContainer.write('test', '1234');
@@ -123,7 +106,7 @@ void main() async {
   });
 
   group('get keys/values', () {
-    eq(i, l) => const ListEquality().equals(i.toList(), l);
+    eq(Iterable i, List l) => const ListEquality().equals(i.toList(), l);
 
     test('should return their stored dynamic values', () {
       expect(eq(g.getKeys().toList(), []), true);
@@ -142,13 +125,4 @@ void main() async {
       expect(eq(g.getValues(), [1, 'a', 3.0]), true);
     });
   });
-}
-
-Future<File> _fileDb(
-    {bool isBackup = false, String fileName = 'OrcaSecureStorage'}) async {
-  final dir = await getApplicationDocumentsDirectory();
-  final path = dir.path;
-  final file =
-      isBackup ? File('$path/$fileName.ossbak') : File('$path/$fileName.oss');
-  return file;
 }
