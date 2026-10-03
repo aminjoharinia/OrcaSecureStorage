@@ -108,9 +108,15 @@ class StorageImpl {
     main.parent.createSync(recursive: true);
 
     final ready = Completer<WorkerReady>();
+    final loaded = Completer<Map<String, dynamic>>();
+    // Awaited only when there is data; a worker failure must not surface
+    // as an unhandled error otherwise.
+    loaded.future.ignore();
     _replies = RawReceivePort((dynamic msg) {
       if (msg is WorkerReady) {
         ready.complete(msg);
+      } else if (msg is LoadedData) {
+        loaded.complete(msg.data);
       } else if (msg is FlushReply) {
         final done = _pending.remove(msg.id);
         if (msg.error == null) {
@@ -122,6 +128,7 @@ class StorageImpl {
         // Uncaught worker error: [error, stack].
         final error = Exception('OrcaSecureStorage worker failed: ${msg.first}');
         if (!ready.isCompleted) ready.completeError(error);
+        if (!loaded.isCompleted) loaded.completeError(error);
         for (final done in _pending.values) {
           done.completeError(error);
         }
@@ -145,11 +152,11 @@ class StorageImpl {
 
     _watchLifecycle();
 
-    if (result.data == null) {
+    if (!result.hasData) {
       _fullResync = true;
       await flush();
     } else {
-      subject.value = result.data;
+      subject.value = await loaded.future;
     }
   }
 

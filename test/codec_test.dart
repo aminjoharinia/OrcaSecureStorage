@@ -198,6 +198,33 @@ void main() {
     expect(assembleDocument(cache), json.encode(map));
   });
 
+  test('splitDocument is the reverse of assembleDocument', () {
+    final map = <String, dynamic>{
+      'a': 1,
+      'neg': -2.5e3,
+      'quote "x" \\ ': ['é', null, true, false, '}{][,:"'],
+      'nested': {
+        'k': [1, {'deep': '\\"'}],
+        'empty': {},
+        'list': []
+      },
+      'فارسی 😀': 'متن',
+      '': '',
+    };
+    final cache = {for (final e in map.entries) e.key: json.encode(e.value)};
+    expect(splitDocument(assembleDocument(cache)), cache);
+    expect(splitDocument('{}'), isEmpty);
+    // Whitespace around the structure, as in files other tools wrote.
+    expect(splitDocument(' {\n "a" : [1, 2] ,\t"b":"x" }\n'), {'a': '[1, 2]', 'b': '"x"'});
+  });
+
+  test('splitDocument refuses what is not a JSON object', () {
+    for (final bad in ['', '[]', '"x"', '{"a":1', '{"a" 1}', '{"a":}', '{a:1}', '{"a":1,}',
+        '{"a":1} x', '{"a":"unterminated}', '{"a":[1,2}']) {
+      expect(() => splitDocument(bad), throwsFormatException, reason: bad);
+    }
+  });
+
   test('encodeDocument streams the same document as encode', () async {
     // Several 64 KB pieces, with multi-byte characters across their edges.
     final map = <String, dynamic>{

@@ -518,6 +518,111 @@ String assembleDocument(Map<String, String> encodedValues) {
   return sb.toString();
 }
 
+/// The reverse of [assembleDocument]: each top-level key of the JSON object
+/// [text] with its value's JSON text, without decoding the values (which
+/// would cost about 6× the text in objects). Checks the object's own syntax;
+/// a value's inside is only scanned for where it ends, so [text] must come
+/// from a trusted, integrity-checked source.
+Map<String, String> splitDocument(String text) {
+  final out = <String, String>{};
+  var i = _skipSpace(text, 0);
+  if (i >= text.length || text.codeUnitAt(i) != _openBrace) {
+    throw const FormatException('container is not a JSON object');
+  }
+  i = _skipSpace(text, i + 1);
+  if (i < text.length && text.codeUnitAt(i) == _closeBrace) {
+    i++;
+  } else {
+    while (true) {
+      if (i >= text.length || text.codeUnitAt(i) != _quote) {
+        throw FormatException('expected a key', text, i);
+      }
+      final keyEnd = _stringEnd(text, i);
+      final raw = text.substring(i + 1, keyEnd - 1);
+      final key = raw.contains(r'\') ? json.decode(text.substring(i, keyEnd)) as String : raw;
+      i = _skipSpace(text, keyEnd);
+      if (i >= text.length || text.codeUnitAt(i) != _colon) {
+        throw FormatException('expected ":"', text, i);
+      }
+      i = _skipSpace(text, i + 1);
+      final start = i;
+      i = _valueEnd(text, i);
+      out[key] = text.substring(start, i);
+      i = _skipSpace(text, i);
+      final c = i < text.length ? text.codeUnitAt(i) : -1;
+      if (c == _comma) {
+        i = _skipSpace(text, i + 1);
+      } else if (c == _closeBrace) {
+        i++;
+        break;
+      } else {
+        throw FormatException('expected "," or "}"', text, i);
+      }
+    }
+  }
+  if (_skipSpace(text, i) != text.length) {
+    throw FormatException('text after the object', text, i);
+  }
+  return out;
+}
+
+const int _quote = 0x22, _backslash = 0x5C, _comma = 0x2C, _colon = 0x3A;
+const int _openBrace = 0x7B, _closeBrace = 0x7D, _openBracket = 0x5B, _closeBracket = 0x5D;
+
+bool _isSpace(int c) => c == 0x20 || c == 0x0A || c == 0x0D || c == 0x09;
+
+int _skipSpace(String s, int i) {
+  while (i < s.length && _isSpace(s.codeUnitAt(i))) {
+    i++;
+  }
+  return i;
+}
+
+/// Index just after the string that starts at [i] (an opening quote).
+int _stringEnd(String s, int i) {
+  for (i++; i < s.length; i++) {
+    final c = s.codeUnitAt(i);
+    if (c == _backslash) {
+      i++;
+    } else if (c == _quote) {
+      return i + 1;
+    }
+  }
+  throw FormatException('unterminated string', s, i);
+}
+
+/// Index just after the value that starts at [i].
+int _valueEnd(String s, int i) {
+  if (i >= s.length) throw FormatException('expected a value', s, i);
+  final first = s.codeUnitAt(i);
+  if (first == _quote) return _stringEnd(s, i);
+  if (first == _openBrace || first == _openBracket) {
+    var depth = 0;
+    while (i < s.length) {
+      final c = s.codeUnitAt(i);
+      if (c == _quote) {
+        i = _stringEnd(s, i);
+        continue;
+      }
+      if (c == _openBrace || c == _openBracket) {
+        depth++;
+      } else if (c == _closeBrace || c == _closeBracket) {
+        if (--depth == 0) return i + 1;
+      }
+      i++;
+    }
+    throw FormatException('unterminated value', s, i);
+  }
+  final start = i;
+  while (i < s.length) {
+    final c = s.codeUnitAt(i);
+    if (c == _comma || c == _closeBrace || c == _closeBracket || _isSpace(c)) break;
+    i++;
+  }
+  if (i == start) throw FormatException('expected a value', s, i);
+  return i;
+}
+
 const String _hexDigits = '0123456789abcdef';
 
 /// Lowercase hex, one allocation for the whole buffer.

@@ -24,7 +24,19 @@ void main() {
           call.method == 'getApplicationDocumentsDirectory' ? dir.path : null,
     );
   });
-  tearDownAll(() => dir.deleteSync(recursive: true));
+  tearDownAll(() async {
+    // A container reopened from a snapshot plus log folds them into a new
+    // snapshot in the background after opening; let that finish.
+    for (var attempt = 0;; attempt++) {
+      try {
+        dir.deleteSync(recursive: true);
+        return;
+      } on FileSystemException {
+        if (attempt == 20) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
+  });
 
   File file(String name) => File('${dir.path}/$name');
   List<int> bytes(String name) => file(name).readAsBytesSync();

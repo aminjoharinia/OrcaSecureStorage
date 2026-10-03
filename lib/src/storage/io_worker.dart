@@ -62,13 +62,31 @@ class WorkerInit {
 
 /// First message from the worker.
 class WorkerReady {
-  WorkerReady(this.port, this.data, this.warnings);
+  WorkerReady(this.port, this.hasData, this.warnings);
   final SendPort port;
 
-  /// The stored container, or null when there is no file yet.
-  final Map<String, dynamic>? data;
+  /// Whether a stored container was found. Its contents follow as a
+  /// [LoadedData] message; false when there is no file yet.
+  final bool hasData;
   final List<String> warnings;
 }
+
+/// The stored container, decoded. Sent with `Isolate.exit` by a short-lived
+/// helper isolate, so the UI isolate receives the objects without copying
+/// them and without decoding on its own thread.
+class LoadedData {
+  LoadedData(this.data);
+  final Map<String, dynamic> data;
+}
+
+class _DecodeJob {
+  _DecodeJob(this.replyTo, this.text);
+  final SendPort replyTo;
+  final String text;
+}
+
+void _decodeForUi(_DecodeJob job) =>
+    Isolate.exit(job.replyTo, LoadedData(json.decode(job.text) as Map<String, dynamic>));
 
 class FlushRequest {
   FlushRequest(this.id, this.reset, this.changes);
@@ -98,17 +116,23 @@ Future<void> storageWorkerMain(WorkerInit init) async {
   final port = ReceivePort();
   final worker = _Worker(init);
   final warnings = <String>[];
-  Map<String, dynamic>? data;
+  String? text;
   try {
-    data = await worker.load(warnings);
+    text = await worker.load(warnings);
   } catch (e) {
     warnings.add('Could not load ${init.mainPath}: $e');
-    data = {};
+    text = '{}';
   }
-  init.replyTo.send(WorkerReady(port.sendPort, data, warnings));
-  // Build the per-key cache (and fold a replayed log into a new snapshot)
-  // after replying, so opening the container does not wait for it. Requests
-  // run after it (they are serialised).
+  init.replyTo.send(WorkerReady(port.sendPort, text != null, warnings));
+  if (text != null) {
+    // The worker itself only keeps each key's JSON text; a helper decodes
+    // the document and hands the objects to the UI isolate.
+    await Isolate.spawn(_decodeForUi, _DecodeJob(init.replyTo, text),
+        onError: init.replyTo, debugName: 'OrcaSecureStorage:decode');
+    text = null;
+  }
+  // Fold a replayed log into a new snapshot after replying, so opening the
+  // container does not wait for it. Requests run after it (serialised).
   await worker.serial(worker.afterLoad);
 
   port.listen((msg) {
@@ -142,7 +166,6 @@ class _Worker {
   final WorkerInit init;
   final StorageCodec _codec;
   final Map<String, String> _cache = <String, String>{};
-  Map<String, dynamic>? _loaded;
 
   // The open log and the snapshot it belongs to.
   RandomAccessFile? _log;
@@ -165,7 +188,9 @@ class _Worker {
 
   // ---- Loading ------------------------------------------------------------
 
-  Future<Map<String, dynamic>?> load(List<String> warnings) async {
+  /// Reads the container into the per-key cache and returns its JSON text
+  /// for the UI isolate, or null when there is no file yet.
+  Future<String?> load(List<String> warnings) async {
     final main = File(init.mainPath);
     final backup = File(init.backupPath);
     final hasMain = _hasData(main);
@@ -179,11 +204,12 @@ class _Worker {
       try {
         final snapshot = await _readSnapshot(main);
         final replay = await _replayLog(snapshot, warnings, fromBackup: false);
-        _fill(snapshot.data);
+        _cache
+          ..clear()
+          ..addAll(snapshot.values);
         if (snapshot.needsRewrite) {
           // Old format or different encryption (e.g. password -> key):
           // convert before init() returns, so the next start can rely on it.
-          fillCache();
           await _compact();
         } else if (replay) {
           // Snapshot + log on disk are complete and durable; fold the log
@@ -192,17 +218,17 @@ class _Worker {
         } else {
           await _resetLog(snapshot.fingerprint, snapshot.length);
         }
-        return snapshot.data;
+        return replay ? assembleDocument(_cache) : snapshot.text;
       } catch (e) {
         warnings.add('Corrupted box, recovering backup file ($e)');
       }
     }
 
-    Map<String, dynamic> data;
+    _cache.clear();
     try {
       final snapshot = await _readSnapshot(backup);
       await _replayLog(snapshot, warnings, fromBackup: true);
-      data = _fill(snapshot.data);
+      _cache.addAll(snapshot.values);
     } catch (e) {
       // Nothing usable. Keep the files aside instead of destroying them, then
       // start empty like get_storage does.
@@ -212,11 +238,9 @@ class _Worker {
         warnings.add('Previous file kept as $kept');
       }
       _keepLogAside(warnings, 'the snapshot could not be read');
-      data = _fill({});
     }
-    fillCache();
     await _compact();
-    return data;
+    return assembleDocument(_cache);
   }
 
   static bool _hasData(File file) => file.existsSync() && file.lengthSync() > 0;
@@ -224,18 +248,19 @@ class _Worker {
   /// Reads the first readable 1.x file pair and writes it in the current
   /// format. The 1.x files are left as they are. Returns null when there is
   /// nothing to convert.
-  Future<Map<String, dynamic>?> _convertLegacy(List<String> warnings) async {
+  Future<String?> _convertLegacy(List<String> warnings) async {
     final paths = init.legacyPaths;
     for (var i = 0; i + 1 < paths.length; i += 2) {
       for (final file in [File(paths[i]), File(paths[i + 1])]) {
         if (!_hasData(file)) continue;
         try {
           final snapshot = await _readSnapshot(file);
-          _fill(snapshot.data);
-          fillCache();
+          _cache
+            ..clear()
+            ..addAll(snapshot.values);
           await _compact();
           warnings.add('Converted ${file.path} to ${init.mainPath}');
-          return snapshot.data;
+          return snapshot.text;
         } catch (e) {
           warnings.add('Could not read ${file.path}, left untouched ($e)');
         }
@@ -247,11 +272,20 @@ class _Worker {
   Future<_Snapshot> _readSnapshot(File file) async {
     final bytes = await file.readAsBytes();
     final doc = await _codec.decode(bytes);
-    final decoded = json.decode(doc.plaintext);
-    if (decoded is! Map<String, dynamic>) {
-      throw const FormatException('container is not a JSON object');
+    final text = doc.plaintext;
+    final Map<String, String> values;
+    if (doc.needsRewrite) {
+      // 1.x or get_storage files are not integrity-checked like the current
+      // format: parse them fully, once, so malformed JSON is refused here.
+      final decoded = json.decode(text);
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('container is not a JSON object');
+      }
+      values = {for (final e in decoded.entries) e.key: json.encode(e.value)};
+    } else {
+      values = splitDocument(text);
     }
-    return _Snapshot(decoded, doc.needsRewrite, await StorageCodec.fingerprintOf(bytes),
+    return _Snapshot(text, values, doc.needsRewrite, await StorageCodec.fingerprintOf(bytes),
         bytes.length);
   }
 
@@ -288,7 +322,7 @@ class _Worker {
       if (offset + 4 + length > bytes.length) break; // torn last record
       final body = Uint8List.sublistView(bytes, offset + 4, offset + 4 + length);
       final payload = await _codec.decodeLogRecord(body, snapshot.fingerprint, seq);
-      if (payload == null || !_apply(snapshot.data, payload)) break;
+      if (payload == null || !_apply(snapshot.values, payload)) break;
       offset += 4 + length;
       seq++;
     }
@@ -301,19 +335,19 @@ class _Worker {
   }
 
   /// Applies one record's payload; false if it is not a valid change.
-  static bool _apply(Map<String, dynamic> data, String payload) {
+  static bool _apply(Map<String, String> values, String payload) {
     try {
       final change = json.decode(payload);
       if (change is! Map) return false;
-      if (change['r'] == true) data.clear();
+      if (change['r'] == true) values.clear();
       final set = change['s'];
       if (set is Map) {
-        set.forEach((k, v) => data[k as String] = v);
+        set.forEach((k, v) => values[k as String] = json.encode(v));
       }
       final del = change['d'];
       if (del is List) {
         for (final k in del) {
-          data.remove(k);
+          values.remove(k);
         }
       }
       return true;
@@ -352,28 +386,13 @@ class _Worker {
     return target;
   }
 
-  /// Remembers [data]; its per-key JSON is built later by [fillCache].
-  Map<String, dynamic> _fill(Map<String, dynamic> data) {
-    _cache.clear();
-    _loaded = data;
-    return data;
-  }
-
-  /// Builds the cache and finishes what [load] deferred. Runs right after the
-  /// data was handed to the UI isolate, before any other request.
+  /// Finishes what [load] deferred. Runs right after the data was handed to
+  /// the UI isolate, before any other request.
   Future<void> afterLoad() async {
-    fillCache();
     if (_compactAfterLoad) {
       _compactAfterLoad = false;
       await _compact();
     }
-  }
-
-  void fillCache() {
-    final data = _loaded;
-    _loaded = null;
-    if (data == null) return;
-    _cache.addAll({for (final e in data.entries) e.key: json.encode(e.value)});
   }
 
   // ---- Writing ------------------------------------------------------------
@@ -503,8 +522,11 @@ class _Worker {
 }
 
 class _Snapshot {
-  _Snapshot(this.data, this.needsRewrite, this.fingerprint, this.length);
-  final Map<String, dynamic> data;
+  _Snapshot(this.text, this.values, this.needsRewrite, this.fingerprint, this.length);
+
+  /// The document as stored, and each top-level key's JSON text.
+  final String text;
+  final Map<String, String> values;
   final bool needsRewrite;
   final Uint8List fingerprint;
   final int length;

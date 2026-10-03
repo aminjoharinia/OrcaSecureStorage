@@ -28,7 +28,7 @@ dependencies:
   orca_secure_storage:
     git:
       url: https://github.com/aminjoharinia/OrcaSecureStorage.git
-      ref: v2.1.7
+      ref: v2.1.8
 ```
 ### Install it
 
@@ -127,15 +127,18 @@ the decoded objects are likely somewhat smaller there.
 On top of that come short peaks. Writing a snapshot builds the document in
 pieces of about 64 KB and compresses each one right away, so it only holds
 the compressed output (about 0.1×) in full, and a large save (such as a bulk
-import) goes straight to a snapshot. Opening a container briefly holds the
-decoded objects in both isolates, until the worker has turned its copy into
-JSON text. Memory freed after a peak is usually kept by the process rather
-than returned to the OS.
+import) goes straight to a snapshot. Opening a container decodes it only
+once: the worker cuts the file into each key's JSON text without decoding
+it, and a short-lived helper isolate decodes the document and hands the
+objects to the UI isolate without copying them, so opening does not block
+the UI. Meanwhile a few copies of the text exist briefly. Memory freed after
+a peak is usually kept by the process rather than returned to the OS.
 
-For a container with 15 MB of record-like JSON, expect roughly 110 MB
-steady and, briefly, around 200 MB while it opens. Containers up to a few MB (settings, tokens, cached
-records) cost little. For larger data, split it across several containers
-or use a database.
+For a container with 15 MB of record-like JSON, a release build on macOS
+adds about 130 MB to the process after writing it and about 200 MB after
+opening it ([measurements](benchmarkapp/results/2026-10-04_memory_open.md)).
+Containers up to a few MB (settings, tokens, cached records) cost little.
+For larger data, split it across several containers or use a database.
 
 ### Files and migration
 Each container is stored as `<container>.oss` with a backup in
