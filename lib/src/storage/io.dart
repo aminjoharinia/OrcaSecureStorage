@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:get/get.dart';
 import 'package:orca_secure_storage/orca_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
@@ -28,6 +29,9 @@ class StorageImpl {
   bool _fullResync = false;
 
   SendPort? _worker;
+  // Kept for the container's lifetime; it compacts when the app is hidden.
+  // ignore: unused_field
+  AppLifecycleListener? _lifecycle;
   RawReceivePort? _replies;
   final Map<int, Completer<void>> _pending = {};
   int _nextId = 0;
@@ -84,6 +88,7 @@ class StorageImpl {
     final dir = await _dir();
     final main = _file(dir, '.oss');
     final backup = _file(dir, '.ossbak');
+    final log = _file(dir, '.osslog');
     main.parent.createSync(recursive: true);
 
     final ready = Completer<WorkerReady>();
@@ -111,7 +116,7 @@ class StorageImpl {
 
     await Isolate.spawn(
       storageWorkerMain,
-      WorkerInit(_replies!.sendPort, main.path, backup.path,
+      WorkerInit(_replies!.sendPort, main.path, backup.path, log.path,
           [for (final f in _legacyFiles(dir)) f.path], config),
       onError: _replies!.sendPort,
       debugName: 'OrcaSecureStorage:$fileName',
@@ -122,12 +127,39 @@ class StorageImpl {
       Get.log(warning, isError: true);
     }
 
+    _watchLifecycle();
+
     if (result.data == null) {
       _fullResync = true;
       await flush();
     } else {
       subject.value = result.data;
     }
+  }
+
+  //^ Writes go to a change log until the app is idle; when it leaves the
+  //^ foreground, fold the log into the snapshot right away. The log is
+  //^ already durable, this only keeps it short.
+  void _watchLifecycle() {
+    try {
+      _lifecycle = AppLifecycleListener(
+        onHide: _compactNow,
+        onPause: _compactNow,
+        onDetach: _compactNow,
+      );
+    } catch (_) {
+      // No Flutter binding (e.g. plain Dart): the idle timer still compacts.
+    }
+  }
+
+  void _compactNow() {
+    final worker = _worker;
+    if (worker == null) return;
+    final id = _nextId++;
+    final done = Completer<void>();
+    _pending[id] = done;
+    done.future.catchError((Object e) => Get.log('$e', isError: true));
+    worker.send(CompactRequest(id));
   }
 
   void remove(String key) {
@@ -144,10 +176,11 @@ class StorageImpl {
     _dirty.add(key);
   }
 
-  // Current files: <container>.oss and <container>.ossbak. Files written by
+  // Current files: <container>.oss, .ossbak and .osslog. Files written by
   // 1.x (and get_storage) are <container>.gs and <container>.bak; they are
   // converted once and then left alone.
-  List<File> _currentFiles(String dir) => [_file(dir, '.oss'), _file(dir, '.ossbak')];
+  List<File> _currentFiles(String dir) =>
+      [_file(dir, '.oss'), _file(dir, '.ossbak'), _file(dir, '.osslog')];
 
   /// Legacy main/backup pairs, in the order they are tried.
   List<File> _legacyFiles(String dir) => [

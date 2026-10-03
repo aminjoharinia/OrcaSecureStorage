@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:get/utils.dart';
+import 'package:webcrypto/webcrypto.dart' show fillRandomBytes;
 
 import 'codec.dart';
 import 'sdk/flutter.dart' if (dart.library.ui) 'sdk/dart.dart';
@@ -24,17 +26,30 @@ class OrcaSecureStorage {
   /// (`GetSecureStorage.gs`) are converted when [defaultContainer] has none.
   static const String legacyDefaultContainer = 'GetSecureStorage';
 
+  /// A new random 256-bit key for [encryptionKey]. Generate it once and keep
+  /// it in secure platform storage (Keychain, Android Keystore, ...).
+  static Uint8List generateKey() {
+    final key = Uint8List(32);
+    fillRandomBytes(key);
+    return key;
+  }
+
   factory OrcaSecureStorage(
       {String container = defaultContainer,
       String? password,
+      List<int>? encryptionKey,
       String? path,
       Map<String, dynamic>? initialData,
       bool migrateUnencrypted = false}) {
+    if (encryptionKey != null && encryptionKey.length != 32) {
+      throw ArgumentError.value(
+          encryptionKey.length, 'encryptionKey', 'must be 32 bytes (AES-256)');
+    }
     if (_sync.containsKey(container)) {
       return _sync[container]!;
     } else {
-      final instance = OrcaSecureStorage._internal(
-          container, path, initialData, password, migrateUnencrypted);
+      final instance = OrcaSecureStorage._internal(container, path,
+          initialData, password, migrateUnencrypted, encryptionKey);
       _sync[container] = instance;
       return instance;
     }
@@ -44,7 +59,8 @@ class OrcaSecureStorage {
       [String? path,
       Map<String, dynamic>? initialData,
       String? password,
-      bool migrateUnencrypted = false]) {
+      bool migrateUnencrypted = false,
+      List<int>? encryptionKey]) {
     _concrete = StorageImpl(key, path);
     _initialData = initialData;
 
@@ -66,6 +82,7 @@ class OrcaSecureStorage {
       }
       await _init(StorageCodecConfig(
         password: password,
+        keyBytes: encryptionKey == null ? null : List<int>.of(encryptionKey),
         legacyKeyBytes: await secretKey?.extractBytes(),
         migrateUnencrypted: migrateUnencrypted,
         nonceField: kNonce,
@@ -82,18 +99,26 @@ class OrcaSecureStorage {
 
   /// Start the storage drive. It's important to use await before calling this API, or side effects will occur.
   ///
+  /// Encryption: pass a [password] (the key is derived with PBKDF2, ~40 ms
+  /// per container when opening), or an [encryptionKey] of 32 random bytes
+  /// you keep in secure platform storage (no derivation, fast to open; see
+  /// [generateKey]). Pass both once to convert password-protected files,
+  /// including 1.x files, to the key; afterwards the key alone is enough.
+  ///
   /// Files from 1.x are detected and rewritten in the current format when
-  /// opened. With a [password], a file that is not encrypted is rejected
-  /// (kept aside as `<container>.gs.rejected`) unless [migrateUnencrypted] is
+  /// opened. When encrypted, a file that is not encrypted is rejected
+  /// (kept aside as `<container>.oss.rejected`) unless [migrateUnencrypted] is
   /// true, in which case it is loaded and encrypted.
   static Future<bool> init(
       {String container = defaultContainer,
       String? password,
+      List<int>? encryptionKey,
       bool migrateUnencrypted = false}) {
     initImpl();
     return OrcaSecureStorage(
             container: container,
             password: password,
+            encryptionKey: encryptionKey,
             migrateUnencrypted: migrateUnencrypted)
         .initStorage;
   }

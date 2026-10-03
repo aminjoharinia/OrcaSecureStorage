@@ -50,11 +50,36 @@ main() async {
   runApp(App());
 }
 ```
+### Password or encryption key
+A `password` is turned into the AES key with PBKDF2 (600,000 iterations,
+about 40 ms per container when it is opened). For fast opening, use a random
+32-byte `encryptionKey` instead and keep it in secure platform storage
+(Keychain, Android Keystore, e.g. with flutter_secure_storage):
+```dart
+final key = OrcaSecureStorage.generateKey(); // once; store it securely
+await OrcaSecureStorage.init(encryptionKey: key);
+```
+To move existing password-protected data (including 1.x files) to a key, pass
+both once; files are read with the password and rewritten with the key:
+```dart
+await OrcaSecureStorage.init(password: 'strongpassword', encryptionKey: key);
+```
+After that, the key alone opens them. A key alone cannot open files that are
+still protected by the password.
+
 `write` returns before the data reaches disk.
 
 ### Files and migration
 Each container is stored as `<container>.oss` with a backup in
-`<container>.ossbak`.
+`<container>.ossbak`, plus a change log `<container>.osslog`: an update
+appends one small encrypted record to the log (fsynced before it counts as
+saved) instead of rewriting the whole file, so it costs about the same at 50
+or 10,000 entries. When writes pause for 300 ms, the log outgrows the
+snapshot, or the app goes to the background, the log is folded into a new
+snapshot and backup. A crash at any point leaves the data readable: a record
+cut short is ignored, a log already contained in the snapshot is not applied
+twice, and anything that cannot be applied is kept as a `.rejected` file
+rather than deleted.
 
 When a container has no `.oss` file yet, its files from get_secure_storage 1.x
 or GetStorage (`<container>.gs` / `<container>.bak`) are read once, written as

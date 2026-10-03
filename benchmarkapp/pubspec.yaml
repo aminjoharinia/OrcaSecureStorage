@@ -41,14 +41,13 @@ dependencies:
   hive_ce: ^2.20.1
   hive_ce_flutter: ^2.4.0
   shared_preferences: ^2.5.5
-  flutter_secure_storage: ^11.2.0
   sqflite: ^2.4.4
   sqflite_common_ffi: ^2.4.3
-  sqlite3_flutter_libs: ^0.6.0+eol
   sembast: ^3.8.11
   sembast_web: ^2.4.6
   path_provider: ^2.1.6
   path: ^1.9.1
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:

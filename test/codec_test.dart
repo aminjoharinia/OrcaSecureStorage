@@ -15,10 +15,13 @@ void main() {
     'MainDB': {'Places': List.generate(200, (i) => {'Name': 'Room $i', 'v': i})}
   });
   // Low iteration count keeps the tests fast; the format stores the count.
-  StorageCodec codec({String? password = 'pw', bool migrate = false, bool gzipOn = true}) =>
+  final rawKey = List<int>.generate(32, (i) => 200 - i);
+  StorageCodec codec(
+          {String? password = 'pw', List<int>? key, bool migrate = false, bool gzipOn = true}) =>
       StorageCodec(
         StorageCodecConfig(
           password: password,
+          keyBytes: key,
           legacyKeyBytes: password == null ? null : legacyKey,
           migrateUnencrypted: migrate,
           kdfIterations: 1000,
@@ -84,6 +87,47 @@ void main() {
     test('truncated file is a FormatException', () async {
       final bytes = await codec().encode(plain);
       expect(() => codec().decode(bytes.sublist(0, 10)), throwsFormatException);
+    });
+  });
+
+  group('raw encryption key', () {
+    test('round trip, no key derivation recorded in the header', () async {
+      final bytes = await codec(password: null, key: rawKey).encode(plain);
+      expect(bytes[5], 2, reason: 'kdf byte = raw key');
+      final doc = await codec(password: null, key: rawKey).decode(bytes);
+      expect(doc.plaintext, plain);
+      expect(doc.needsRewrite, isFalse);
+    });
+
+    test('wrong key, missing key or password only is rejected', () async {
+      final bytes = await codec(password: null, key: rawKey).encode(plain);
+      expect(() => codec(password: null, key: List.filled(32, 1)).decode(bytes),
+          throwsA(isA<StorageRejectedException>()));
+      expect(() => codec().decode(bytes), throwsA(isA<StorageRejectedException>()));
+      expect(() => codec(password: null).decode(bytes),
+          throwsA(isA<StorageRejectedException>()));
+    });
+
+    test('password file: key alone is rejected, password + key converts', () async {
+      final bytes = await codec().encode(plain);
+      expect(() => codec(password: null, key: rawKey).decode(bytes),
+          throwsA(isA<StorageRejectedException>()));
+      final both = codec(key: rawKey);
+      final doc = await both.decode(bytes);
+      expect(doc.plaintext, plain);
+      expect(doc.needsRewrite, isTrue);
+      final rewritten = await both.encode(doc.plaintext);
+      expect(rewritten[5], 2);
+      expect((await codec(password: null, key: rawKey).decode(rewritten)).plaintext, plain);
+    });
+
+    test('1.x file needs the password; with password + key it converts', () async {
+      final file = utf8.encode(await encodeLegacyDocument(legacyKey, plain));
+      expect(() => codec(password: null, key: rawKey).decode(file),
+          throwsA(isA<StorageRejectedException>()));
+      final doc = await codec(key: rawKey).decode(file);
+      expect(doc.plaintext, plain);
+      expect(doc.needsRewrite, isTrue);
     });
   });
 

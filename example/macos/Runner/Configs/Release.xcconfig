@@ -1,2 +1,6 @@
 #include "../../Flutter/Flutter-Release.xcconfig"
 #include "Warnings.xcconfig"
+
+// Apple Silicon only: webcrypto 0.6.1 cannot cross-compile BoringSSL for
+// x86_64 on an arm64 Mac (missing fiat_p256_adx_* symbols).
+ARCHS = arm64

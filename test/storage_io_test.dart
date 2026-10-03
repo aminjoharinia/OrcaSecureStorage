@@ -30,11 +30,18 @@ void main() {
   bool containsText(String name, String text) =>
       latin1.decode(bytes(name)).contains(text);
 
-  /// Opens a fresh instance on a copy of [container]'s file, so the data
+  /// Copies a container's current files (snapshot, backup, change log).
+  void copyContainer(String from, String to) {
+    for (final ext in ['.oss', '.ossbak', '.osslog']) {
+      if (file('$from$ext').existsSync()) file('$from$ext').copySync('${dir.path}/$to$ext');
+    }
+  }
+
+  /// Opens a fresh instance on a copy of [container]'s files, so the data
   /// really comes from disk.
   Future<OrcaSecureStorage> reopen(String container, String copy,
       {String? password = _password, bool migrateUnencrypted = false}) async {
-    file('$container.oss').copySync('${dir.path}/$copy.oss');
+    copyContainer(container, copy);
     await OrcaSecureStorage.init(
         container: copy, password: password, migrateUnencrypted: migrateUnencrypted);
     return OrcaSecureStorage(container: copy);
@@ -166,7 +173,7 @@ void main() {
     final src = OrcaSecureStorage(container: 'nopw_src');
     src.write('injected', true);
     await flushed(src);
-    file('nopw_src.oss').copySync('${dir.path}/swap.oss');
+    copyContainer('nopw_src', 'swap');
 
     await OrcaSecureStorage.init(container: 'swap', password: _password);
     expect(OrcaSecureStorage(container: 'swap').read('injected'), isNull);
@@ -179,7 +186,7 @@ void main() {
     box.write('a', 'abc');
     await flushed(box);
 
-    file('corrupt.ossbak').copySync('${dir.path}/corrupt_r.ossbak');
+    copyContainer('corrupt', 'corrupt_r');
     file('corrupt_r.oss').writeAsStringSync('ndj323e');
     await OrcaSecureStorage.init(container: 'corrupt_r', password: _password);
     expect(OrcaSecureStorage(container: 'corrupt_r').read('a'), 'abc');
@@ -197,6 +204,46 @@ void main() {
     final r = await reopen('pw', 'pw_r', password: 'wrong');
     expect(r.read('secret'), isNull);
     expect(bytes('pw_r.oss.rejected'), original);
+  });
+
+  test('password container converts to an encryption key', () async {
+    final key = OrcaSecureStorage.generateKey();
+    await OrcaSecureStorage.init(container: 'pk', password: _password);
+    final box = OrcaSecureStorage(container: 'pk');
+    box.write('ledger', [1, 2, 3]);
+    await flushed(box);
+
+    // Key alone cannot open a password file: kept aside, starts empty.
+    copyContainer('pk', 'pk_keyonly');
+    await OrcaSecureStorage.init(container: 'pk_keyonly', encryptionKey: key);
+    expect(OrcaSecureStorage(container: 'pk_keyonly').read('ledger'), isNull);
+    expect(file('pk_keyonly.oss.rejected').existsSync(), isTrue);
+
+    // Password + key: read with the password, rewritten with the key.
+    copyContainer('pk', 'pk_both');
+    await OrcaSecureStorage.init(container: 'pk_both', password: _password, encryptionKey: key);
+    expect(OrcaSecureStorage(container: 'pk_both').read('ledger'), [1, 2, 3]);
+    expect(bytes('pk_both.oss')[5], 2, reason: 'now a raw-key file');
+
+    // From now on the key alone is enough.
+    copyContainer('pk_both', 'pk_after');
+    await OrcaSecureStorage.init(container: 'pk_after', encryptionKey: key);
+    expect(OrcaSecureStorage(container: 'pk_after').read('ledger'), [1, 2, 3]);
+  });
+
+  test('1.x .gs file converts straight to an encryption key', () async {
+    final key = OrcaSecureStorage.generateKey();
+    final legacy = await encodeLegacyDocument(
+        await legacyKey(_password), json.encode({'v': 'one'}));
+    file('v1k.gs').writeAsStringSync(legacy);
+    await OrcaSecureStorage.init(container: 'v1k', password: _password, encryptionKey: key);
+    expect(OrcaSecureStorage(container: 'v1k').read('v'), 'one');
+    expect(bytes('v1k.oss')[5], 2);
+  });
+
+  test('encryptionKey must be 32 bytes', () {
+    expect(() => OrcaSecureStorage(container: 'badkey', encryptionKey: [1, 2, 3]),
+        throwsArgumentError);
   });
 
   test('container without password is a compressed .oss file', () async {

@@ -20,7 +20,11 @@ class StorageImpl {
 
   ValueStorage<Map<String, dynamic>> subject = ValueStorage<Map<String, dynamic>>(<String, dynamic>{});
 
+  // Set by every change; a flush with nothing new to save does nothing.
+  bool _dirty = false;
+
   void clear() {
+    _dirty = true;
     localStorage.removeItem(fileName);
     subject.value?.clear();
 
@@ -36,8 +40,21 @@ class StorageImpl {
     return localStorage.getItem(fileName) != null;
   }
 
-  Future<void> flush() {
-    return _writeToStorage(subject.value ?? {});
+  //^ Each flush rewrites the whole container, so a burst of writes awaited
+  //^ one by one used to rewrite it once per write (quadratic). Waiting one
+  //^ event-loop turn lets the burst finish first; the flushes queued behind
+  //^ this one then find nothing dirty and return.
+  Future<void> flush() async {
+    if (!_dirty) return;
+    await Future<void>.delayed(Duration.zero);
+    if (!_dirty) return;
+    _dirty = false;
+    try {
+      await _writeToStorage(subject.value ?? {});
+    } catch (_) {
+      _dirty = true;
+      rethrow;
+    }
   }
 
   T? read<T>(String key) {
@@ -52,9 +69,9 @@ class StorageImpl {
     return subject.value!.values as T;
   }
 
-  /// The web build re-encodes the whole container on each flush (there is no
-  /// background isolate), so there is nothing to mark.
-  void markAllDirty() {}
+  /// The web build re-encodes the whole container on each flush, so marking
+  /// it dirty is enough.
+  void markAllDirty() => _dirty = true;
 
   Future<void> init(Map<String, dynamic>? initialData, StorageCodecConfig config) async {
     _codec = StorageCodec(config);
@@ -68,12 +85,14 @@ class StorageImpl {
   }
 
   void remove(String key) {
+    _dirty = true;
     subject
       ..value?.remove(key)
       ..changeValue(key, null);
   }
 
   void write(String key, dynamic value) {
+    _dirty = true;
     subject
       ..value![key] = value
       ..changeValue(key, value);
