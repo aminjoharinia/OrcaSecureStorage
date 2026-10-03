@@ -1,4 +1,4 @@
-# OrcaSecureStorage 2.1.3: Lazy 1.x Key
+# OrcaSecureStorage 2.1.4: Lazy 1.x Key
 
 **Date:** 2026-10-03
 **Based on:** `v2.1.2`
@@ -16,7 +16,7 @@ The 1.x key is now derived **in the background isolate**, and **only when a
 1.x file is actually read**. Nothing changes on disk: the file formats are the
 same, and 1.x files are read and converted exactly as before.
 
-| | Before (2.1.2) | After (2.1.3) |
+| | Before (2.1.2) | After (2.1.4) |
 |---|---|---|
 | Where the 1.x key is derived | UI isolate, in the constructor | Background isolate, in the codec |
 | When | Every open with a `password` | The first time a 1.x file is read |
@@ -89,7 +89,7 @@ as before, but still only when a 1.x value is found.
 
 ## Compatibility
 
-- **On disk:** no change. 2.1.3 reads and writes the same files as 2.1.2.
+- **On disk:** no change. 2.1.4 reads and writes the same files as 2.1.2.
 - **1.x files:** converted as before, with the password alone or with the
   password and an `encryptionKey`.
 - **API:** no change, except that `algorithm` and `secretKey` stay null.
