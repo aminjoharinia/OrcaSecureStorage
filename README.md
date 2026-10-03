@@ -88,10 +88,10 @@ A container lives in memory twice, on purpose:
 └────────────────────────────┘            └─────────────────────────────────────┘
 ```
 
-1. **The map on the UI isolate** is what `read` returns, so reads are instant
-   and need no `await`.
-2. **The worker's copy** holds every key's JSON text. Dart isolates do not
-   share memory, so the worker keeps its own copy. With it, the worker can
+1. **The decoded objects on the UI isolate** are what `read` returns, so
+   reads are instant and need no `await`. This is the larger copy.
+2. **The worker's copy** holds every key's JSON text; it is the smaller
+   copy. Dart isolates do not share memory, so the worker keeps its own. With it, the worker can
    build a new snapshot (join the JSON, compress, encrypt, write) whenever it
    likes, without asking the UI isolate for anything.
 
@@ -100,11 +100,24 @@ you wrote, never the whole container. Without the copy, every snapshot would
 mean encoding the whole container on the UI thread, about 100 ms at 15 MB,
 which drops frames.
 
-The cost is memory: about twice the container's size (a 15 MB container
-uses roughly 30 MB or more). That is negligible for typical containers
-(settings, tokens, cached records up to a few MB). For containers of tens of
-MB on low-memory devices, split the data across several containers or use a
-database.
+The cost is memory, and the two copies are not the same size:
+
+| Copy | Size, compared with the container's JSON |
+|---|---|
+| Decoded objects on the UI isolate (maps, strings, numbers) | about 5× |
+| The worker's JSON text | about 1×; up to 2× when strings contain characters outside Latin-1 (Persian, Arabic, CJK, emoji), which Dart stores at 2 bytes per character |
+| The file on disk (compressed, encrypted) | about 0.1× |
+
+On top of that come short peaks. Writing a snapshot briefly holds about two
+more copies of the JSON (the joined document and its UTF-8 bytes), plus the
+much smaller compressed output. Opening a container briefly holds the decoded objects in both
+isolates, until the worker has turned its copy into JSON text. Memory freed
+after a peak is usually kept by the process rather than returned to the OS.
+
+For a container with 15 MB of JSON, expect roughly 90 MB steady and around
+150 MB while it opens. Containers up to a few MB (settings, tokens, cached
+records) cost little. For larger data, split it across several containers
+or use a database.
 
 ### Files and migration
 Each container is stored as `<container>.oss` with a backup in
