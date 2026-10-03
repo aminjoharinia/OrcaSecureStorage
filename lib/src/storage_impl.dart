@@ -244,6 +244,9 @@ class OrcaSecureStorage {
   Future<void> flush() async {
     // Errors from earlier saves are superseded by this attempt.
     _saveError = null;
+    // Schedule a save even if one looks pending: `queue.cancelAllJobs()` can
+    // drop a queued save without clearing the flag.
+    _saveScheduled = false;
     _tryFlush();
     // The save scheduled above joins the queue first.
     await Future<void>.microtask(() {});
@@ -258,20 +261,23 @@ class OrcaSecureStorage {
   bool _saveScheduled = false;
   (Object, StackTrace)? _saveError;
 
-  //^ One save per event-loop turn, however many writes it had. Saves run one
-  //^ at a time in [queue]; a save never throws into the queue (GetQueue only
-  //^ catches Exception, and an Error would stop it for good). Errors are
-  //^ logged and kept for [flush]. A save with nothing to do returns at once.
+  //^ At most one save waits in [queue] behind the one running: writes made
+  //^ before a save starts are all picked up by it, so the flag is cleared
+  //^ only when it starts. (Clearing it when the save was queued let each
+  //^ awaited write queue its own save; a 10,000-write loop left thousands of
+  //^ empty saves that then ran back to back, freezing the UI for ~200 ms.)
+  //^ Saves run one at a time; a save never throws into the queue (GetQueue
+  //^ only catches Exception, and an Error would stop it for good). Errors
+  //^ are logged and kept for [flush].
   Future<void> _tryFlush() async {
     if (_saveScheduled) return;
     _saveScheduled = true;
-    scheduleMicrotask(() {
-      _saveScheduled = false;
-      queue.add(_flush);
-    });
+    scheduleMicrotask(() => queue.add(_flush));
   }
 
   Future<void> _flush() async {
+    // Changes made from here on need another save.
+    _saveScheduled = false;
     try {
       await _concrete.flush();
     } catch (e, s) {

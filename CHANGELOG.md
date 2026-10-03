@@ -1,3 +1,7 @@
+## [2.1.6]
+- **Fix:** a burst of awaited writes no longer freezes the UI. Each `await box.write(...)` queued its own save, so a loop of 10,000 writes left thousands of empty saves that ran back to back afterwards and blocked the UI isolate (and the background worker) for about 200 ms. Now at most one save waits behind the one running, and it picks up every change made in the meantime. In the test VM, the longest UI stall during a 10,000-entry write or delete drops from 170–250 ms to under 3 ms, and the bulk write and delete themselves get 4–5× faster.
+- `flush()` now always schedules a save, so a save dropped by `queue.cancelAllJobs()` cannot hold back later ones.
+
 ## [2.1.5]
 - Docs only: the changelog and `LEGACY_KEY_CHANGES.md` no longer refer to the withdrawn 2.1.3. Same code as 2.1.4.
 

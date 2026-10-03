@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/services.dart';
@@ -340,6 +342,32 @@ void main() {
     await flushed(box);
     expect(isV2('nopw.oss'), isTrue);
     expect((await reopen('nopw', 'nopw_r', password: null)).read('x'), [1, 'two']);
+  });
+
+  test('a burst of awaited writes does not block the event loop', () async {
+    // Each awaited write used to queue its own save; the thousands of empty
+    // saves left after the loop then ran back to back (~200 ms freeze).
+    await OrcaSecureStorage.init(container: 'burst');
+    final box = OrcaSecureStorage(container: 'burst');
+    final clock = Stopwatch()..start();
+    var last = 0, maxGap = 0;
+    final ticker = Timer.periodic(const Duration(milliseconds: 1), (_) {
+      final now = clock.elapsedMilliseconds;
+      maxGap = max(maxGap, now - last);
+      last = now;
+    });
+    for (var i = 0; i < 10000; i++) {
+      await box.write('k$i', 'value $i');
+      if ((i + 1) % 50 == 0) await Future<void>.delayed(Duration.zero);
+    }
+    await box.flush();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    ticker.cancel();
+    expect(maxGap, lessThan(100));
+
+    final copy = await reopen('burst', 'burst_r', password: null);
+    expect(copy.getKeys<Iterable<String>>().length, 10000);
+    expect(copy.read('k9999'), 'value 9999');
   });
 }
 
