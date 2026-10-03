@@ -1,3 +1,4 @@
+// ignore_for_file: constant_identifier_names
 const int _HASH_MASK = 0x7fffffff;
 
 class ListEquality<E> implements Equality<List<E>> {

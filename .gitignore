@@ -118,4 +118,6 @@ storage_benchmark/android/gradlew
 **/*.bak
 **/*.oss
 **/*.ossbak
+**/*.osslog
 **/*.rejected
+**/*.rejected.*

@@ -32,7 +32,12 @@ import '../codec.dart';
 // - If the snapshot is unreadable, the backup is used with the log that
 //   belongs to it.
 // - Nothing is deleted on a failure: unreadable snapshots and logs are copied
-//   to `.rejected` files before the container starts over.
+//   to `.rejected` files (up to five each) before the container starts over.
+
+/// Where an unreadable file at [path] is kept: `<path>.rejected`, then
+/// `<path>.rejected.2` up to `.rejected.5`.
+List<String> rejectedPaths(String path) =>
+    ['$path.rejected', for (var i = 2; i <= 5; i++) '$path.rejected.$i'];
 
 /// Writes go to the log until there has been no write for this long.
 const _idleDelay = Duration(milliseconds: 300);
@@ -203,8 +208,8 @@ class _Worker {
       // start empty like get_storage does.
       warnings.add('Can not recover Corrupted box ($e)');
       if (hasMain) {
-        main.copySync('${init.mainPath}.rejected');
-        warnings.add('Previous file kept as ${init.mainPath}.rejected');
+        final kept = _keepAside(main, warnings);
+        warnings.add('Previous file kept as $kept');
       }
       _keepLogAside(warnings, 'the snapshot could not be read');
       data = _fill({});
@@ -321,8 +326,30 @@ class _Worker {
   void _keepLogAside(List<String> warnings, String reason) {
     final file = File(init.logPath);
     if (!file.existsSync() || file.lengthSync() == 0) return;
-    file.copySync('${init.logPath}.rejected');
-    warnings.add('Change log not fully used ($reason); kept as ${init.logPath}.rejected');
+    final kept = _keepAside(file, warnings);
+    warnings.add('Change log not fully used ($reason); kept as $kept');
+  }
+
+  /// Copies [file] to the first free name of [rejectedPaths], so earlier
+  /// copies are not overwritten; when all are taken, replaces the oldest.
+  String _keepAside(File file, List<String> warnings) {
+    final paths = rejectedPaths(file.path);
+    var target = paths.firstWhere(
+      (p) => !File(p).existsSync(),
+      orElse: () => '',
+    );
+    if (target.isEmpty) {
+      target = paths.reduce((a, b) =>
+          File(a).lastModifiedSync().isBefore(File(b).lastModifiedSync())
+              ? a
+              : b);
+      warnings.add('$target replaced: at most ${paths.length} rejected '
+          'copies are kept');
+    }
+    file.copySync(target);
+    // Copies may keep the source's time; the oldest copy is found by it.
+    File(target).setLastModifiedSync(DateTime.now());
+    return target;
   }
 
   /// Remembers [data]; its per-key JSON is built later by [fillCache].
@@ -394,7 +421,7 @@ class _Worker {
     }
   }
 
-  /// {"r":false,"s":{"key":<json>},"d":["key"]}, with values embedded as the
+  /// `{"r":false,"s":{"key":<json>},"d":["key"]}`, with values embedded as the
   /// JSON text the UI isolate already encoded.
   static String _payload(Map<String, String> set, List<String> del) {
     final sb = StringBuffer('{"r":false,"s":{');

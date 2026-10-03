@@ -67,7 +67,14 @@ class StorageImpl {
     final done = Completer<void>();
     _pending[id] = done;
     _worker!.send(FlushRequest(id, reset, changes));
-    return done.future;
+    try {
+      await done.future;
+    } catch (_) {
+      // Which of these changes reached the file is unknown: send every key
+      // again with the next flush.
+      _fullResync = true;
+      rethrow;
+    }
   }
 
   T? read<T>(String key) {
@@ -182,6 +189,12 @@ class StorageImpl {
   List<File> _currentFiles(String dir) =>
       [_file(dir, '.oss'), _file(dir, '.ossbak'), _file(dir, '.osslog')];
 
+  /// Copies kept aside after a failed open (see [rejectedPaths]).
+  List<File> _rejectedFiles(String dir) => [
+        for (final ext in ['.oss', '.osslog'])
+          for (final path in rejectedPaths(_file(dir, ext).path)) File(path),
+      ];
+
   /// Legacy main/backup pairs, in the order they are tried.
   List<File> _legacyFiles(String dir) => [
         _file(dir, '.gs'),
@@ -197,11 +210,15 @@ class StorageImpl {
     return [..._currentFiles(dir), ..._legacyFiles(dir)].any((f) => f.existsSync());
   }
 
-  /// Deletes the container's current and legacy files, so a deleted
-  /// container is not converted again from its old files.
+  /// Deletes the container's current, legacy and rejected files, so a
+  /// deleted container is not converted again from its old files.
   Future<void> _deleteFile() async {
     final dir = await _dir();
-    for (final file in [..._currentFiles(dir), ..._legacyFiles(dir)]) {
+    for (final file in [
+      ..._currentFiles(dir),
+      ..._legacyFiles(dir),
+      ..._rejectedFiles(dir),
+    ]) {
       if (file.existsSync()) await file.delete();
     }
   }
@@ -214,12 +231,12 @@ class StorageImpl {
     return File('$dir$separator${name ?? fileName}$extension');
   }
 
-  static deleteContainer(container, [String? path]) async {
+  static Future<void> deleteContainer(String container, [String? path]) async {
     final tmp = StorageImpl(container, path);
     await tmp._deleteFile();
   }
 
-  static Future<bool> hasContainer(container, [String? path]) async {
+  static Future<bool> hasContainer(String container, [String? path]) async {
     final tmp = StorageImpl(container, path);
     return tmp._hasFile();
   }

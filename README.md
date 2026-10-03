@@ -67,7 +67,8 @@ await OrcaSecureStorage.init(password: 'strongpassword', encryptionKey: key);
 After that, the key alone opens them. A key alone cannot open files that are
 still protected by the password.
 
-`write` returns before the data reaches disk.
+`write` returns before the data reaches disk; `await box.flush()` waits until
+it is saved.
 
 ### Files and migration
 Each container is stored as `<container>.oss` with a backup in
@@ -103,6 +104,18 @@ final box = OrcaSecureStorage(password: 'strongpassword');
 ```dart
 box.write('quote', 'OrcaSecureStorage is the best');
 ```
+
+`write` makes the value readable at once and saves it in the background.
+To wait until everything written so far is on disk (and to see a failed
+save, such as a full disk), await `flush`:
+```dart
+box.write('quote', 'OrcaSecureStorage is the best');
+await box.flush();
+```
+
+Opening a container that is already open returns the same instance. Pass
+the same `password` / `encryptionKey` / `path`, or none; different ones
+throw a `StateError`.
 
 #### To read values you use `read`:
 ```dart

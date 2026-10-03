@@ -10,6 +10,8 @@
 analyzer:
   exclude:
     - build/**
+    # Vendored third-party code, kept as published.
+    - benchmark/third_party/**
 include: package:flutter_lints/flutter.yaml
 
 linter:

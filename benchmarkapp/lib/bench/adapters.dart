@@ -59,7 +59,7 @@ class OrcaAdapter extends StorageAdapter {
     OrcaMode.none => 'Orca',
   };
   @override
-  String get package => 'orca_secure_storage 2.0.0';
+  String get package => 'orca_secure_storage 2.1.0';
   @override
   String get encryption => switch (mode) {
     OrcaMode.password => 'AES-256-GCM, PBKDF2 key',
@@ -88,7 +88,7 @@ class OrcaAdapter extends StorageAdapter {
   @override
   Future<void> delete(String key) => _box.remove(key);
   @override
-  Future<void> flush() => waitForQueue(_box.queue);
+  Future<void> flush() => _box.flush();
   @override
   Future<void> abort() async {
     _box.queue.cancelAllJobs();
@@ -120,7 +120,7 @@ class OrcaAdapter extends StorageAdapter {
     if (cold == null) return;
     _cold = null;
     await cold.erase();
-    await waitForQueue(cold.queue);
+    await cold.flush();
     await deleteStore(_coldName!, ['.oss', '.ossbak', '.osslog']);
   }
 }

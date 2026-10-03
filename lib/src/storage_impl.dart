@@ -45,14 +45,36 @@ class OrcaSecureStorage {
       throw ArgumentError.value(
           encryptionKey.length, 'encryptionKey', 'must be 32 bytes (AES-256)');
     }
-    if (_sync.containsKey(container)) {
-      return _sync[container]!;
-    } else {
-      final instance = OrcaSecureStorage._internal(container, path,
-          initialData, password, migrateUnencrypted, encryptionKey);
-      _sync[container] = instance;
-      return instance;
+    if (_sync[container] case final open?) {
+      // `OrcaSecureStorage()` without arguments returns the open container;
+      // different arguments would be silently ignored, so they throw.
+      final conflict = [
+        if (password != null && password != open._password) 'password',
+        if (encryptionKey != null && !_sameBytes(encryptionKey, open._key))
+          'encryptionKey',
+        if (path != null && path != open._path) 'path',
+        if (migrateUnencrypted && !open._migrateUnencrypted)
+          'migrateUnencrypted',
+      ];
+      if (conflict.isNotEmpty) {
+        throw StateError('Container "$container" is already open with a '
+            'different ${conflict.join(', ')}. Use the same arguments, or '
+            'none to get the open container.');
+      }
+      return open;
     }
+    final instance = OrcaSecureStorage._internal(container, path,
+        initialData, password, migrateUnencrypted, encryptionKey);
+    _sync[container] = instance;
+    return instance;
+  }
+
+  static bool _sameBytes(List<int> a, List<int>? b) {
+    if (b == null || a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   OrcaSecureStorage._internal(String key,
@@ -60,7 +82,11 @@ class OrcaSecureStorage {
       Map<String, dynamic>? initialData,
       String? password,
       bool migrateUnencrypted = false,
-      List<int>? encryptionKey]) {
+      List<int>? encryptionKey])
+      : _password = password,
+        _key = encryptionKey == null ? null : List<int>.of(encryptionKey),
+        _path = path,
+        _migrateUnencrypted = migrateUnencrypted {
     _concrete = StorageImpl(key, path);
     _initialData = initialData;
 
@@ -95,6 +121,14 @@ class OrcaSecureStorage {
 
   static final Map<String, OrcaSecureStorage> _sync = {};
 
+  // The arguments the container was opened with.
+  final String? _password;
+  final List<int>? _key;
+  final String? _path;
+  final bool _migrateUnencrypted;
+
+  /// No longer used; await [flush] to wait for saves.
+  @Deprecated('Not used by OrcaSecureStorage any more.')
   final microtask = Microtask();
 
   /// Start the storage drive. It's important to use await before calling this API, or side effects will occur.
@@ -126,7 +160,7 @@ class OrcaSecureStorage {
   static Future<bool> hasContainer(String container, [String? path]) =>
       StorageImpl.hasContainer(container, path);
 
-  static deleteContainer(String container, [String? path]) =>
+  static Future<void> deleteContainer(String container, [String? path]) =>
       StorageImpl.deleteContainer(container, path);
 
   Future<void> _init(StorageCodecConfig config) async {
@@ -171,7 +205,10 @@ class OrcaSecureStorage {
     return _concrete.subject.addListener(listen);
   }
 
-  /// Write data on your container
+  /// Writes [value] under [key]. The value is readable at once; it is saved
+  /// in the background, together with other writes made in the same
+  /// event-loop turn. The returned future does not wait for the save: await
+  /// [flush] for that, and to see save errors.
   Future<void> write(String key, dynamic value) async {
     writeInMemory(key, value);
     return _tryFlush();
@@ -206,21 +243,43 @@ class OrcaSecureStorage {
     return _tryFlush();
   }
 
-  Future<void> _tryFlush() async {
-    return microtask.exec(_addToQueue);
+  /// Completes when every change made so far is saved (for files: fsynced).
+  /// Throws the first save error since the last [flush], if any; failed
+  /// changes stay in memory and are saved again with the next change.
+  Future<void> flush() async {
+    // A save scheduled in this event-loop turn joins the queue first.
+    if (_saveScheduled) await Future<void>.microtask(() {});
+    await queue.add(() async {});
+    final error = _saveError;
+    if (error != null) {
+      _saveError = null;
+      Error.throwWithStackTrace(error.$1, error.$2);
+    }
   }
 
-  Future _addToQueue() {
-    return queue.add(_flush);
+  bool _saveScheduled = false;
+  (Object, StackTrace)? _saveError;
+
+  //^ One save per event-loop turn, however many writes it had. Saves run one
+  //^ at a time in [queue]; a save never throws into the queue (GetQueue only
+  //^ catches Exception, and an Error would stop it for good). Errors are
+  //^ logged and kept for [flush].
+  Future<void> _tryFlush() async {
+    if (_saveScheduled) return;
+    _saveScheduled = true;
+    scheduleMicrotask(() {
+      _saveScheduled = false;
+      queue.add(_flush);
+    });
   }
 
   Future<void> _flush() async {
     try {
       await _concrete.flush();
-    } catch (e) {
-      rethrow;
+    } catch (e, s) {
+      Get.log('OrcaSecureStorage: saving failed ($e)', isError: true);
+      _saveError ??= (e, s);
     }
-    return;
   }
 
   late StorageImpl _concrete;

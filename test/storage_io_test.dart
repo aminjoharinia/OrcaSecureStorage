@@ -241,6 +241,62 @@ void main() {
     expect(bytes('v1k.oss')[5], 2);
   });
 
+  test('flush() waits until writes are saved', () async {
+    await OrcaSecureStorage.init(container: 'fl', password: _password);
+    final box = OrcaSecureStorage(container: 'fl');
+    box.write('a', 1);
+    box.write('b', [2]);
+    await box.flush();
+    final r = await reopen('fl', 'fl_r');
+    expect(r.read('a'), 1);
+    expect(r.read('b'), [2]);
+  });
+
+  test('flush() reports a failed save; later saves still work', () async {
+    await OrcaSecureStorage.init(container: 'ferr', password: _password);
+    final box = OrcaSecureStorage(container: 'ferr');
+    box.write('bad', Object()); // jsonEncode cannot encode it (an Error)
+    await expectLater(box.flush(), throwsA(isA<JsonUnsupportedObjectError>()));
+    await box.flush(); // the error is reported once
+
+    box.remove('bad');
+    box.write('good', 'yes');
+    await box.flush();
+    final r = await reopen('ferr', 'ferr_r');
+    expect(r.read('good'), 'yes');
+    expect(r.read('bad'), isNull);
+  });
+
+  test('an open container with different arguments throws', () async {
+    final key = OrcaSecureStorage.generateKey();
+    await OrcaSecureStorage.init(container: 'args', password: _password);
+    expect(() => OrcaSecureStorage(container: 'args', password: 'other'),
+        throwsStateError);
+    expect(() => OrcaSecureStorage(container: 'args', encryptionKey: key),
+        throwsStateError);
+    expect(() => OrcaSecureStorage(container: 'args', migrateUnencrypted: true),
+        throwsStateError);
+    expect(OrcaSecureStorage(container: 'args'),
+        same(OrcaSecureStorage(container: 'args', password: _password)));
+  });
+
+  test('earlier rejected copies are kept; deleteContainer removes them', () async {
+    await OrcaSecureStorage.init(container: 'rej', password: _password);
+    final box = OrcaSecureStorage(container: 'rej');
+    box.write('secret', 1);
+    await box.flush();
+    final original = bytes('rej.oss');
+    file('rej_r.oss.rejected').writeAsStringSync('older copy');
+
+    await reopen('rej', 'rej_r', password: 'wrong');
+    expect(file('rej_r.oss.rejected').readAsStringSync(), 'older copy');
+    expect(bytes('rej_r.oss.rejected.2'), original);
+
+    await OrcaSecureStorage.deleteContainer('rej_r');
+    expect(file('rej_r.oss.rejected').existsSync(), isFalse);
+    expect(file('rej_r.oss.rejected.2').existsSync(), isFalse);
+  });
+
   test('encryptionKey must be 32 bytes', () {
     expect(() => OrcaSecureStorage(container: 'badkey', encryptionKey: [1, 2, 3]),
         throwsArgumentError);

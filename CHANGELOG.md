@@ -1,3 +1,9 @@
+## [2.1.0]
+- **`flush()`**: completes when every change so far is saved (fsynced) and throws the first save error since the last `flush()`. `write`, `remove`, `erase` and `save` still return before the data is saved. A failed save is logged instead of becoming an unhandled error, the changes are saved again with the next one, and an `Error` thrown while saving (e.g. a value `jsonEncode` cannot encode) no longer stops all later saves.
+- **Behaviour change:** calling the constructor or `init` for an open container with a different `password`, `encryptionKey`, `path` or `migrateUnencrypted` now throws a `StateError` instead of returning the open container and ignoring them. Calling it without those arguments still returns the open container.
+- Rejected files no longer overwrite each other: up to five copies are kept (`.rejected`, `.rejected.2` … `.rejected.5`; the oldest is replaced after that). `deleteContainer` removes them.
+- `flutter_lints` 6; `deleteContainer` and `hasContainer` have typed signatures.
+
 ## [2.0.0]
 - **Renamed to OrcaSecureStorage**: package `orca_secure_storage`, class `OrcaSecureStorage`, import `package:orca_secure_storage/orca_secure_storage.dart`, repository https://github.com/aminjoharinia/OrcaSecureStorage. The default container is now `OrcaSecureStorage`.
 - **Change log for updates**: writes append an encrypted, fsynced record to `<container>.osslog` instead of rewriting the container, and are folded into the snapshot after 300 ms without writes, when the log outgrows the snapshot, or when the app is hidden. Single-entry updates cost ~0.1 ms regardless of container size (was ~6 ms at 10,000 entries). Records are bound to their snapshot (fingerprint + sequence number in the AES-GCM additional data, or in the CRC-32 without encryption); torn, stale or damaged logs are detected, and any log not fully applied is kept as `.osslog.rejected`. The backup is now written with each snapshot instead of on every write.

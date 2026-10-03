@@ -33,8 +33,9 @@ class StorageImpl {
       ..changeValue("", null);
   }
 
-  static Future<bool> hasContainer(container, [String? path]) async => true;
-  static deleteContainer(container, [String? path]) {}
+  static Future<bool> hasContainer(String container, [String? path]) async =>
+      true;
+  static Future<void> deleteContainer(String container, [String? path]) async {}
 
   Future<bool> _exists() async {
     return localStorage.getItem(fileName) != null;
