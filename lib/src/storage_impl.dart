@@ -209,18 +209,25 @@ class OrcaSecureStorage {
   /// in the background, together with other writes made in the same
   /// event-loop turn. The returned future does not wait for the save: await
   /// [flush] for that, and to see save errors.
-  Future<void> write(String key, dynamic value) async {
+  ///
+  /// The value is converted to JSON here (objects through their `toJson`),
+  /// and saved as it is now; after changing it in place, call [save]. A value
+  /// that cannot be converted throws a [JsonUnsupportedObjectError] right
+  /// away and nothing is stored.
+  Future<void> write(String key, dynamic value) {
     writeInMemory(key, value);
     return _tryFlush();
   }
 
+  /// Like [write], without saving. Throws the same way for a value that
+  /// cannot be converted to JSON.
   void writeInMemory(String key, dynamic value) {
     _concrete.write(key, value);
   }
 
   /// Write data on your only if data is null
-  Future<void> writeIfNull(String key, dynamic value) async {
-    if (read(key) != null) return;
+  Future<void> writeIfNull(String key, dynamic value) {
+    if (read(key) != null) return Future<void>.value();
     return write(key, value);
   }
 
@@ -244,11 +251,15 @@ class OrcaSecureStorage {
   }
 
   /// Completes when every change made so far is saved (for files: fsynced).
-  /// Throws the first save error since the last [flush], if any; failed
-  /// changes stay in memory and are saved again with the next change.
+  /// Saves anything not saved yet, including changes whose save failed
+  /// earlier. Throws if saving fails; the changes stay in memory and are
+  /// tried again with the next write or [flush].
   Future<void> flush() async {
-    // A save scheduled in this event-loop turn joins the queue first.
-    if (_saveScheduled) await Future<void>.microtask(() {});
+    // Errors from earlier saves are superseded by this attempt.
+    _saveError = null;
+    _tryFlush();
+    // The save scheduled above joins the queue first.
+    await Future<void>.microtask(() {});
     await queue.add(() async {});
     final error = _saveError;
     if (error != null) {
@@ -263,7 +274,7 @@ class OrcaSecureStorage {
   //^ One save per event-loop turn, however many writes it had. Saves run one
   //^ at a time in [queue]; a save never throws into the queue (GetQueue only
   //^ catches Exception, and an Error would stop it for good). Errors are
-  //^ logged and kept for [flush].
+  //^ logged and kept for [flush]. A save with nothing to do returns at once.
   Future<void> _tryFlush() async {
     if (_saveScheduled) return;
     _saveScheduled = true;

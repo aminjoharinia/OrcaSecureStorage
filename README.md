@@ -17,13 +17,18 @@ by Jonny Borges.
 - **Crash-safe:** files are written to a temp file and renamed into place.
 
 Supports Android, iOS, Web, Mac, Linux, and Windows. Can store String, int,
-double, Map and List. Requires Dart 3.10 (Flutter 3.38) or later.
+double, bool, Map and List, and objects with a `toJson()` method (read back
+as a `Map` after a restart). Requires Dart 3.10 (Flutter 3.38) or later.
 
 ### Add to your pubspec:
-```
+Pin a release tag, so `flutter pub upgrade` never changes the file format
+under your users' data without you choosing to:
+```yaml
 dependencies:
   orca_secure_storage:
-    git: https://github.com/aminjoharinia/OrcaSecureStorage
+    git:
+      url: https://github.com/aminjoharinia/OrcaSecureStorage.git
+      ref: v2.1.1
 ```
 ### Install it
 
@@ -70,6 +75,37 @@ still protected by the password.
 `write` returns before the data reaches disk; `await box.flush()` waits until
 it is saved.
 
+### How it works (and its memory use)
+A container lives in memory twice, on purpose:
+
+```
+ UI isolate                                 background isolate (one per container)
+┌────────────────────────────┐  changed   ┌─────────────────────────────────────┐
+│ Map<String, dynamic>       │  keys as   │ each key's JSON text                │
+│  read() answers from here, │  JSON ───▶ │  appends changes to the log; builds │
+│  synchronously             │            │  snapshots: join, gzip, encrypt,    │
+│ write() encodes one value  │            │  write temp file, fsync, rename     │
+└────────────────────────────┘            └─────────────────────────────────────┘
+```
+
+1. **The map on the UI isolate** is what `read` returns, so reads are instant
+   and need no `await`.
+2. **The worker's copy** holds every key's JSON text. Dart isolates do not
+   share memory, so the worker keeps its own copy. With it, the worker can
+   build a new snapshot (join the JSON, compress, encrypt, write) whenever it
+   likes, without asking the UI isolate for anything.
+
+The second copy is what keeps the UI smooth: a `write` only encodes the value
+you wrote, never the whole container. Without the copy, every snapshot would
+mean encoding the whole container on the UI thread, about 100 ms at 15 MB,
+which drops frames.
+
+The cost is memory: about twice the container's size (a 15 MB container
+uses roughly 30 MB or more). That is negligible for typical containers
+(settings, tokens, cached records up to a few MB). For containers of tens of
+MB on low-memory devices, split the data across several containers or use a
+database.
+
 ### Files and migration
 Each container is stored as `<container>.oss` with a backup in
 `<container>.ossbak`, plus a change log `<container>.osslog`: an update
@@ -107,11 +143,17 @@ box.write('quote', 'OrcaSecureStorage is the best');
 
 `write` makes the value readable at once and saves it in the background.
 To wait until everything written so far is on disk (and to see a failed
-save, such as a full disk), await `flush`:
+save, such as a full disk), await `flush`. `flush` also retries a save that
+failed earlier:
 ```dart
 box.write('quote', 'OrcaSecureStorage is the best');
 await box.flush();
 ```
+
+`write` converts the value to JSON straight away (objects through their
+`toJson()`), and saves it as it is at that moment. A value that cannot be
+converted throws a `JsonUnsupportedObjectError` from `write` and is not
+stored. If you change a stored list or map in place, call `save()`.
 
 Opening a container that is already open returns the same instance. Pass
 the same `password` / `encryptionKey` / `path`, or none; different ones

@@ -1,3 +1,9 @@
+## [2.1.1]
+- **Fix:** a value that cannot be converted to JSON (e.g. an object without `toJson`) no longer blocks every later save of its container. `write` and `writeInMemory` now convert the value straight away and throw a `JsonUnsupportedObjectError` without storing it. The JSON made there is reused for the save, so values are not encoded twice. A value is saved as it was when written; call `save()` after changing it in place.
+- `flush()` now retries a failed save itself (before, only the next write did) and throws only if saving still fails.
+- `write` and `writeIfNull` throw synchronously for such values, so the error is not lost when the future is not awaited.
+- README: install snippet pins a tag; new section on how a container is held in memory and why.
+
 ## [2.1.0]
 - **`flush()`**: completes when every change so far is saved (fsynced) and throws the first save error since the last `flush()`. `write`, `remove`, `erase` and `save` still return before the data is saved. A failed save is logged instead of becoming an unhandled error, the changes are saved again with the next one, and an `Error` thrown while saving (e.g. a value `jsonEncode` cannot encode) no longer stops all later saves.
 - **Behaviour change:** calling the constructor or `init` for an open container with a different `password`, `encryptionKey`, `path` or `migrateUnencrypted` now throws a `StateError` instead of returning the open container and ignoring them. Calling it without those arguments still returns the open container.

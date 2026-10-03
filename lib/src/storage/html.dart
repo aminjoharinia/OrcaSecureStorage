@@ -93,6 +93,9 @@ class StorageImpl {
   }
 
   void write(String key, dynamic value) {
+    // Refuse a value that cannot be encoded before storing it; every flush
+    // encodes the whole container, so one bad value would stop all saves.
+    json.encode(value);
     _dirty = true;
     subject
       ..value![key] = value

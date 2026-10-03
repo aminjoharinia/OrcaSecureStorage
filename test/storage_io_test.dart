@@ -252,19 +252,50 @@ void main() {
     expect(r.read('b'), [2]);
   });
 
-  test('flush() reports a failed save; later saves still work', () async {
+  test('a value that cannot be encoded is refused by write()', () async {
     await OrcaSecureStorage.init(container: 'ferr', password: _password);
     final box = OrcaSecureStorage(container: 'ferr');
-    box.write('bad', Object()); // jsonEncode cannot encode it (an Error)
-    await expectLater(box.flush(), throwsA(isA<JsonUnsupportedObjectError>()));
-    await box.flush(); // the error is reported once
-
-    box.remove('bad');
     box.write('good', 'yes');
+    expect(() => box.write('bad', Object()),
+        throwsA(isA<JsonUnsupportedObjectError>()));
+    expect(() => box.writeInMemory('bad', Object()),
+        throwsA(isA<JsonUnsupportedObjectError>()));
+    expect(box.read('bad'), isNull, reason: 'nothing is stored');
+
+    box.write('after', 2); // the bad key does not block later saves
     await box.flush();
     final r = await reopen('ferr', 'ferr_r');
     expect(r.read('good'), 'yes');
+    expect(r.read('after'), 2);
     expect(r.read('bad'), isNull);
+  });
+
+  test('objects are saved through toJson', () async {
+    await OrcaSecureStorage.init(container: 'tojson', password: _password);
+    final box = OrcaSecureStorage(container: 'tojson');
+    box.write('model', _Model(7));
+    await box.flush();
+    expect((await reopen('tojson', 'tojson_r')).read('model'), {'id': 7});
+  });
+
+  test('flush() retries a failed save and reports it', () async {
+    await OrcaSecureStorage.init(container: 'retry', password: _password);
+    final box = OrcaSecureStorage(container: 'retry');
+    final list = <Object>[1];
+    box.write('list', list);
+    await box.flush();
+    // Changed in place to something that cannot be encoded: save() fails.
+    list.add(Object());
+    await box.save();
+    await expectLater(box.flush(), throwsA(isA<JsonUnsupportedObjectError>()));
+    await expectLater(box.flush(), throwsA(isA<JsonUnsupportedObjectError>()),
+        reason: 'still not saved, so flush() keeps failing');
+
+    list
+      ..removeLast()
+      ..add(2); // fixed in place
+    await box.flush(); // retried without a new write
+    expect((await reopen('retry', 'retry_r')).read('list'), [1, 2]);
   });
 
   test('an open container with different arguments throws', () async {
@@ -310,4 +341,10 @@ void main() {
     expect(isV2('nopw.oss'), isTrue);
     expect((await reopen('nopw', 'nopw_r', password: null)).read('x'), [1, 'two']);
   });
+}
+
+class _Model {
+  _Model(this.id);
+  final int id;
+  Map<String, dynamic> toJson() => {'id': id};
 }

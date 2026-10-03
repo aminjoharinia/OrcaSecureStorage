@@ -25,6 +25,9 @@ class StorageImpl {
   //^ encryption and file I/O. Encoding the whole container here cost
   //^ ~100 ms per write at 15 MB.
   final Set<String> _dirty = <String>{};
+  // JSON of the values written since the last flush, made in [write] so a
+  // value that cannot be encoded is refused there and never stored.
+  final Map<String, String> _encoded = <String, String>{};
   bool _cleared = false;
   bool _fullResync = false;
 
@@ -41,6 +44,7 @@ class StorageImpl {
       ..value!.clear()
       ..changeValue("", null);
     _dirty.clear();
+    _encoded.clear();
     _cleared = true;
   }
 
@@ -54,14 +58,19 @@ class StorageImpl {
     final reset = _fullResync || _cleared;
     if (!reset && _dirty.isEmpty) return;
     final data = subject.value!;
-    final keys = _fullResync ? data.keys : _dirty;
+    // A full resync re-encodes every value, catching changes made in place.
+    final full = _fullResync;
+    final keys = full ? data.keys : _dirty;
     final changes = <String, String?>{
       for (final key in keys)
-        key: data.containsKey(key) ? json.encode(data[key]) : null,
+        key: !data.containsKey(key)
+            ? null
+            : (full ? null : _encoded[key]) ?? json.encode(data[key]),
     };
     _fullResync = false;
     _cleared = false;
     _dirty.clear();
+    _encoded.clear();
 
     final id = _nextId++;
     final done = Completer<void>();
@@ -174,13 +183,16 @@ class StorageImpl {
       ..value!.remove(key)
       ..changeValue(key, null);
     _dirty.add(key);
+    _encoded.remove(key);
   }
 
   void write(String key, dynamic value) {
+    final encoded = json.encode(value); // throws before anything changes
     subject
       ..value![key] = value
       ..changeValue(key, value);
     _dirty.add(key);
+    _encoded[key] = encoded;
   }
 
   // Current files: <container>.oss, .ossbak and .osslog. Files written by
