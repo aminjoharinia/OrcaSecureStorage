@@ -83,6 +83,35 @@ the web; `--dart-define=THEME=light` or `dark` picks the theme):
 flutter run --release -d macos --dart-define=AUTORUN=true --dart-define=ENTRIES=100 --dart-define=KINDS=integers,json
 ```
 
+If the window is hidden or minimized, the headless run can stall waiting for
+a frame; keep it visible.
+
+## Memory
+
+[`lib/memory_main.dart`](lib/memory_main.dart) measures memory, one storage
+and one phase per process so each process's memory belongs to that storage
+alone (not on the web; its window stays blank):
+
+- **write**: opens an empty store, writes `MEM_MB` (default 15) MB of JSON
+  records (~330 bytes each) one by one, waits until saved.
+- **open**: opens that data in a new process, as on an app start, and reads
+  every record.
+
+It prints the resident memory the storage added: held two seconds after the
+phase (`steadyMB`) and at its highest (`peakMB`). Memory freed after a peak
+usually stays with the process, so the two are often close.
+
+```bash
+flutter build macos --release -t lib/memory_main.dart
+```
+
+```bash
+MEM_STORAGE='Hive CE' MEM_PHASE=write build/macos/Build/Products/Release/storage_benchmark.app/Contents/MacOS/storage_benchmark
+```
+
+`MEM_STORAGE` is a storage's full name as in the results tables. Saved runs
+are in [`results/`](results).
+
 ## Platform notes
 
 | Platform | Status | Notes |
