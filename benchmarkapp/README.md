@@ -6,7 +6,7 @@ tabs, integers vs strings, 10–1000 entries.
 
 | Label | Storage | Encryption |
 |---|---|---|
-| Orca pw 🔒 | OrcaSecureStorage (this repo) with a password | AES-256-GCM, key from PBKDF2 (50,000 iterations) |
+| Orca pw 🔒 | OrcaSecureStorage (this repo) with a password | AES-256-GCM, key from PBKDF2 (600,000 iterations) |
 | Orca key 🔒 | OrcaSecureStorage with `encryptionKey` | AES-256-GCM, raw 32-byte key |
 | Orca | OrcaSecureStorage, no password | none |
 | GSS 🔒 | get_secure_storage 1.0.5 (gslender) | AES-128-CTR + HMAC |

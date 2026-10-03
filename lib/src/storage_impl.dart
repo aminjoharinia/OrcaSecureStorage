@@ -119,8 +119,8 @@ class OrcaSecureStorage {
 
   /// Start the storage drive. It's important to use await before calling this API, or side effects will occur.
   ///
-  /// Encryption: pass a [password] (the key is derived with PBKDF2, 50,000
-  /// iterations, a few ms per container when opening), or an [encryptionKey]
+  /// Encryption: pass a [password] (the key is derived with PBKDF2, 600,000
+  /// iterations, ~40 ms per container when opening), or an [encryptionKey]
   /// of 32 random bytes you keep in secure platform storage (no derivation,
   /// fast to open; see [generateKey]). Pass both to convert password-protected
   /// files, including 1.x files, to the key. If 1.x files may still turn up

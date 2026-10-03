@@ -7,7 +7,7 @@ Based on [get_secure_storage](https://github.com/gslender/get_secure_storage) by
 gslender, itself a secure version of [GetStorage](https://github.com/jonataslaw/get_storage)
 by Jonny Borges.
 
-- **Encryption:** AES-256-GCM, key derived with PBKDF2-HMAC-SHA256 (50,000
+- **Encryption:** AES-256-GCM, key derived with PBKDF2-HMAC-SHA256 (600,000
   iterations, random salt per container), through BoringSSL
   ([webcrypto](https://pub.dev/packages/webcrypto)) or the browser's WebCrypto.
 - **Compact files:** data is gzip-compressed before encryption; a 15 MB
@@ -28,7 +28,7 @@ dependencies:
   orca_secure_storage:
     git:
       url: https://github.com/aminjoharinia/OrcaSecureStorage.git
-      ref: v2.1.3
+      ref: v2.1.4
 ```
 ### Install it
 
@@ -56,15 +56,10 @@ main() async {
 }
 ```
 ### Password or encryption key
-A `password` is turned into the AES key with PBKDF2 (50,000 iterations,
-a few milliseconds per container when it is opened; more on slow phones).
-That is fewer than OWASP's 600,000 for PBKDF2-SHA256, trading resistance to
-password guessing for startup time; a long random password matters more than
-the count. Files written with 600,000 iterations by 2.1.2 and earlier are
-read once with that count and rewritten with 50,000. For fast opening with no
-derivation at all, use a random 32-byte `encryptionKey` instead and keep it
-in secure platform storage (Keychain, Android Keystore, e.g. with
-flutter_secure_storage):
+A `password` is turned into the AES key with PBKDF2 (600,000 iterations,
+about 40 ms per container when it is opened). For fast opening, use a random
+32-byte `encryptionKey` instead and keep it in secure platform storage
+(Keychain, Android Keystore, e.g. with flutter_secure_storage):
 ```dart
 final key = OrcaSecureStorage.generateKey(); // once; store it securely
 await OrcaSecureStorage.init(encryptionKey: key);

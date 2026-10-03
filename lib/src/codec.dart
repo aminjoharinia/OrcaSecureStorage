@@ -12,7 +12,7 @@ class StorageCodecConfig {
     this.keyBytes,
     this.legacyKeyBytes,
     this.migrateUnencrypted = false,
-    this.kdfIterations = 50000,
+    this.kdfIterations = 600000,
     this.nonceField = 'nonce',
     this.macField = 'mac',
     this.cipherTextField = 'cipherText',
@@ -38,9 +38,8 @@ class StorageCodecConfig {
   /// been swapped in by anyone able to write the app's files.
   final bool migrateUnencrypted;
 
-  /// PBKDF2 iterations for files written with a password. A file written
-  /// with another count (2.1.2 and earlier used 600,000) is read with the
-  /// count from its header, then rewritten with a new salt and this count.
+  /// PBKDF2 iterations for new files (OWASP 2023 figure for SHA-256). Files
+  /// keep the count they were written with, read from their header.
   final int kdfIterations;
 
   final String nonceField;
@@ -182,12 +181,11 @@ class StorageCodec {
         ..add(_u32(0))
         ..addByte(0);
     } else {
-      if (_salt == null || _iterations != config.kdfIterations) {
+      if (_salt == null) {
         final salt = Uint8List(_saltLength);
         fillRandomBytes(salt);
         _salt = salt;
         _iterations = config.kdfIterations;
-        _key = null; // derived for the old salt; _keyFor must not reuse it
       }
       key = await _keyFor(_salt!, _iterations);
       header
@@ -224,8 +222,6 @@ class StorageCodec {
     final encrypted = flags & _flagEncrypted != 0;
     // A password-protected file opened with a key as well: convert it.
     var toRawKey = false;
-    // Written with another PBKDF2 count: rewrite it with the configured one.
-    var otherCount = false;
     List<int> payload;
     if (encrypted) {
       if (!config.encrypted) {
@@ -245,7 +241,6 @@ class StorageCodec {
           }
           key = await _keyFor(salt, iterations);
           toRawKey = config.keyBytes != null;
-          otherCount = iterations != config.kdfIterations;
         case _kdfRawKey:
           if (config.keyBytes == null) {
             throw StorageRejectedException('file uses an encryption key; none was given');
@@ -275,7 +270,7 @@ class StorageCodec {
       payload = gunzip(payload);
     }
     return DecodedDocument(utf8.decode(payload),
-        needsRewrite: encrypted != config.encrypted || toRawKey || otherCount);
+        needsRewrite: encrypted != config.encrypted || toRawKey);
   }
 
   // ---- Change log --------------------------------------------------------

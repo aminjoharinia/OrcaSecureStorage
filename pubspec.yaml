@@ -1,6 +1,6 @@
 name: orca_secure_storage
 description: Encrypted, fast key-value storage for Flutter (AES-256-GCM, compressed, written off the UI thread). Based on get_secure_storage and get_storage.
-version: 2.1.3
+version: 2.1.4
 homepage: https://github.com/aminjoharinia/OrcaSecureStorage
 repository: https://github.com/aminjoharinia/OrcaSecureStorage
 

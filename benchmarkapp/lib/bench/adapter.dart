@@ -9,7 +9,7 @@ abstract class StorageAdapter {
   /// Short label under the chart bars.
   String get label;
 
-  /// Package, e.g. `orca_secure_storage 2.1.3`.
+  /// Package, e.g. `orca_secure_storage 2.1.4`.
   String get package;
 
   /// `none`, or the cipher / mechanism used.

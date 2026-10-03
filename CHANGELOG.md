@@ -1,3 +1,6 @@
+## [2.1.4]
+- **PBKDF2 back to 600,000 iterations** (the OWASP figure for PBKDF2-SHA256) for files written with a password, as in 2.1.2. The re-encryption of files written with a different count, added in 2.1.3, is removed again.
+
 ## [2.1.3]
 - **Faster start with a password:** the 1.x key (PBKDF2, 1,000 iterations, pure Dart) is no longer derived on the UI isolate every time a container is opened with a password. It is derived in the background isolate, and only when a 1.x file is actually read. Saves about 3.5 ms per container on a desktop CPU, more on phones. See [LEGACY_KEY_CHANGES.md](LEGACY_KEY_CHANGES.md).
 - **PBKDF2 iterations lowered from 600,000 to 50,000** for files written with a password: opening such a container takes a few milliseconds instead of ~40 ms (more on phones). Existing files keep working: they are read with the count stored in their header, then rewritten once with a new salt and 50,000 iterations. 50,000 is below OWASP's 600,000 for PBKDF2-SHA256; use a long random password, or an `encryptionKey`.
