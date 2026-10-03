@@ -1,3 +1,6 @@
+## [2.1.5]
+- Docs only: the changelog and `LEGACY_KEY_CHANGES.md` no longer refer to the withdrawn 2.1.3. Same code as 2.1.4.
+
 ## [2.1.4]
 - **Faster start with a password:** the 1.x key (PBKDF2, 1,000 iterations, pure Dart) is no longer derived on the UI isolate every time a container is opened with a password. It is derived in the background isolate, and only when a 1.x file is actually read. Saves about 3.5 ms per container on a desktop CPU, more on phones. See [LEGACY_KEY_CHANGES.md](LEGACY_KEY_CHANGES.md).
 - The deprecated `algorithm` and `secretKey` fields are no longer set (they are now always null).
