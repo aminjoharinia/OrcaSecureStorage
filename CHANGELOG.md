@@ -1,3 +1,8 @@
+## [2.1.7]
+- **Much lower memory peak for large saves.** Change-log records were assembled through `List<int>` spreads, which take 8 bytes per byte, so saving 15 MB at once (e.g. a bulk import) raised memory by about 570 MB (encrypted) or 695 MB (unencrypted). Records are now built as bytes, and a save too large for the log is written as a new snapshot straight away. The same 15 MB save now adds about 20–25 MB. Reading an unencrypted log no longer copies it into a list either.
+- **Snapshots are built in pieces.** The document is turned into UTF-8 and compressed about 64 KB at a time instead of being held whole as text and as bytes. Building a snapshot of a 15 MB container now needs about 16 MB extra instead of 70 MB (104 MB with Persian text). Same file format.
+- README: memory figures measured instead of estimated. The decoded objects take about 6× the JSON for record-like data (not 5×) and about 2.5× for long strings; a 15 MB container takes roughly 110 MB steady (not 90 MB).
+
 ## [2.1.6]
 - **Fix:** a burst of awaited writes no longer freezes the UI. Each `await box.write(...)` queued its own save, so a loop of 10,000 writes left thousands of empty saves that ran back to back afterwards and blocked the UI isolate (and the background worker) for about 200 ms. Now at most one save waits behind the one running, and it picks up every change made in the meantime. In the test VM, the longest UI stall during a 10,000-entry write or delete drops from 170–250 ms to under 3 ms, and the bulk write and delete themselves get 4–5× faster.
 - `flush()` now always schedules a save, so a save dropped by `queue.cancelAllJobs()` cannot hold back later ones.

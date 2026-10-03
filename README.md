@@ -28,7 +28,7 @@ dependencies:
   orca_secure_storage:
     git:
       url: https://github.com/aminjoharinia/OrcaSecureStorage.git
-      ref: v2.1.6
+      ref: v2.1.7
 ```
 ### Install it
 
@@ -109,22 +109,31 @@ you wrote, never the whole container. Without the copy, every snapshot would
 mean encoding the whole container on the UI thread, about 100 ms at 15 MB,
 which drops frames.
 
-The cost is memory, and the two copies are not the same size:
+The cost is memory, and the two copies are not the same size. Measured
+after garbage collection on a 64-bit desktop, against the container's JSON
+(UTF-8):
 
-| Copy | Size, compared with the container's JSON |
-|---|---|
-| Decoded objects on the UI isolate (maps, strings, numbers) | about 5× |
-| The worker's JSON text | about 1×; up to 2× when strings contain characters outside Latin-1 (Persian, Arabic, CJK, emoji), which Dart stores at 2 bytes per character |
-| The file on disk (compressed, encrypted) | about 0.1× |
+| Copy | Records (maps, numbers, short strings) | Long string values |
+|---|---|---|
+| Decoded objects on the UI isolate | about 6× | about 2.5× |
+| The worker's JSON text | about 1×; up to 2× | about 1×; up to 2.3× |
+| The file on disk (compressed, encrypted) | about 0.1× | about 0.1× |
 
-On top of that come short peaks. Writing a snapshot briefly holds about two
-more copies of the JSON (the joined document and its UTF-8 bytes), plus the
-much smaller compressed output. Opening a container briefly holds the decoded objects in both
-isolates, until the worker has turned its copy into JSON text. Memory freed
-after a peak is usually kept by the process rather than returned to the OS.
+The worker's copy reaches the upper figure when strings contain characters
+outside Latin-1 (Persian, Arabic, CJK, emoji, even `—` or `×`), which Dart
+stores at 2 bytes per character. On phones Dart uses 4-byte pointers, so
+the decoded objects are likely somewhat smaller there.
 
-For a container with 15 MB of JSON, expect roughly 90 MB steady and around
-150 MB while it opens. Containers up to a few MB (settings, tokens, cached
+On top of that come short peaks. Writing a snapshot builds the document in
+pieces of about 64 KB and compresses each one right away, so it only holds
+the compressed output (about 0.1×) in full, and a large save (such as a bulk
+import) goes straight to a snapshot. Opening a container briefly holds the
+decoded objects in both isolates, until the worker has turned its copy into
+JSON text. Memory freed after a peak is usually kept by the process rather
+than returned to the OS.
+
+For a container with 15 MB of record-like JSON, expect roughly 110 MB
+steady and, briefly, around 200 MB while it opens. Containers up to a few MB (settings, tokens, cached
 records) cost little. For larger data, split it across several containers
 or use a database.
 
@@ -135,7 +144,8 @@ appends one small encrypted record to the log (fsynced before it counts as
 saved) instead of rewriting the whole file, so it costs about the same at 50
 or 10,000 entries. When writes pause for 300 ms, the log outgrows the
 snapshot, or the app goes to the background, the log is folded into a new
-snapshot and backup. A crash at any point leaves the data readable: a record
+snapshot and backup. A save too large for the log (such as a bulk import)
+is written as a new snapshot straight away. A crash at any point leaves the data readable: a record
 cut short is ignored, a log already contained in the snapshot is not applied
 twice, and anything that cannot be applied is kept as a `.rejected` file
 rather than deleted.

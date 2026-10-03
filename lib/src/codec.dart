@@ -68,6 +68,7 @@ class DecodedDocument {
 }
 
 typedef BytesTransform = List<int> Function(List<int> input);
+typedef BytesConverter = Converter<List<int>, List<int>>;
 
 // Format 2 (format 1 is the 1.x JSON files), all integers big-endian:
 //
@@ -117,7 +118,7 @@ class StorageCodec {
   final StorageCodecConfig config;
 
   /// gzip on platforms that have it (`dart:io`); null writes uncompressed.
-  final BytesTransform? compress;
+  final BytesConverter? compress;
   final BytesTransform? decompress;
 
   Uint8List? _salt;
@@ -146,13 +147,49 @@ class StorageCodec {
     return key;
   }
 
-  Future<Uint8List> encode(String plaintext) async {
-    List<int> payload = utf8.encode(plaintext);
-    var flags = 0;
-    if (compress != null) {
-      payload = compress!(payload);
-      flags |= _flagCompressed;
+  Future<Uint8List> encode(String plaintext) {
+    final gz = compress;
+    final bytes = utf8.encode(plaintext);
+    return gz == null ? _seal(bytes, 0) : _seal(gz.convert(bytes), _flagCompressed);
+  }
+
+  /// Like `encode(assembleDocument(encodedValues))`, without ever holding the
+  /// whole document: it is built and turned into UTF-8 in pieces of about
+  /// 64 KB, each compressed right away. A snapshot of a 15 MB container
+  /// otherwise holds two extra full copies (the text and its UTF-8 bytes).
+  Future<Uint8List> encodeDocument(Map<String, String> encodedValues) {
+    final gz = compress;
+    if (gz == null) return encode(assembleDocument(encodedValues));
+    final out = BytesBuilder(copy: true);
+    final utf8Sink = utf8.encoder
+        .startChunkedConversion(gz.startChunkedConversion(_BytesBuilderSink(out)));
+    final piece = StringBuffer();
+    void write(String s) {
+      piece.write(s);
+      if (piece.length >= _pieceLength) {
+        utf8Sink.add(piece.toString());
+        piece.clear();
+      }
     }
+
+    write('{');
+    var first = true;
+    encodedValues.forEach((key, value) {
+      if (!first) write(',');
+      first = false;
+      write(json.encode(key));
+      write(':');
+      write(value);
+    });
+    write('}');
+    utf8Sink
+      ..add(piece.toString())
+      ..close();
+    return _seal(out.takeBytes(), _flagCompressed);
+  }
+
+  /// Adds the header and, when configured, encrypts [payload].
+  Future<Uint8List> _seal(List<int> payload, int flags) async {
     final header = BytesBuilder(copy: false)
       ..add(_magic)
       ..addByte(_version);
@@ -322,22 +359,29 @@ class StorageCodec {
     return Uint8List.fromList(Uint8List.sublistView(bytes, 5, logHeaderLength));
   }
 
-  /// One record, length prefix included.
+  /// One record, length prefix included. Built as bytes throughout: a
+  /// `List<int>` takes 8 bytes per element, so spreading a 15 MB record into
+  /// one used to cost about 500 MB.
   Future<Uint8List> encodeLogRecord(String payload, Uint8List fingerprint, int seq) async {
     final plain = utf8.encode(payload);
-    final List<int> body;
+    final List<int> check;
+    final List<int> data;
     if (_logEncrypted) {
       final key = _snapshotKey;
       if (key == null) throw StateError('no snapshot key for the change log');
       final nonce = Uint8List(_nonceLength);
       fillRandomBytes(nonce);
-      final cipherText =
-          await key.encryptBytes(plain, nonce, additionalData: _logAad(fingerprint, seq));
-      body = [...nonce, ...cipherText];
+      check = nonce;
+      data = await key.encryptBytes(plain, nonce, additionalData: _logAad(fingerprint, seq));
     } else {
-      body = [..._u32(crc32([..._logAad(fingerprint, seq), ...plain])), ...plain];
+      check = _u32(crc32(plain, crc32(_logAad(fingerprint, seq))));
+      data = plain;
     }
-    return Uint8List.fromList([..._u32(body.length), ...body]);
+    return (BytesBuilder(copy: false)
+          ..add(_u32(check.length + data.length))
+          ..add(check)
+          ..add(data))
+        .takeBytes();
   }
 
   /// The payload of a record body, or null if it fails its check (torn
@@ -357,7 +401,7 @@ class StorageCodec {
       if (body.length < 4) return null;
       final crc = (body[0] << 24) | (body[1] << 16) | (body[2] << 8) | body[3];
       final plain = Uint8List.sublistView(body, 4);
-      if (crc32([..._logAad(fingerprint, seq), ...plain]) != crc) return null;
+      if (crc32(plain, crc32(_logAad(fingerprint, seq))) != crc) return null;
       return utf8.decode(plain);
     } on OperationError {
       return null;
@@ -444,6 +488,17 @@ Future<String> encodeLegacyDocument(List<int> keyBytes, String plaintext) async 
     'mac': hexEncode(box.mac.bytes),
     'cipherText': hexEncode(box.cipherText),
   });
+}
+
+const int _pieceLength = 64 * 1024;
+
+class _BytesBuilderSink implements Sink<List<int>> {
+  _BytesBuilderSink(this._out);
+  final BytesBuilder _out;
+  @override
+  void add(List<int> data) => _out.add(data);
+  @override
+  void close() {}
 }
 
 /// Builds `{"k1":v1,"k2":v2}` from already-encoded values. The result equals
@@ -553,9 +608,11 @@ final Uint32List _crcTable = () {
   return t;
 }();
 
-/// CRC-32 (IEEE), for detecting torn or corrupted log records.
-int crc32(List<int> bytes) {
-  var c = 0xFFFFFFFF;
+/// CRC-32 (IEEE), for detecting torn or corrupted log records. Pass the
+/// CRC of earlier bytes as [crc] to continue it: `crc32(b, crc32(a))` is the
+/// CRC of `a` followed by `b`.
+int crc32(List<int> bytes, [int crc = 0]) {
+  var c = crc ^ 0xFFFFFFFF;
   for (final b in bytes) {
     c = _crcTable[(c ^ b) & 0xff] ^ (c >> 8);
   }

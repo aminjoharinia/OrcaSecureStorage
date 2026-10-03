@@ -26,7 +26,7 @@ void main() {
           migrateUnencrypted: migrate,
           kdfIterations: 1000,
         ),
-        compress: gzipOn ? GZipCodec(level: 1).encode : null,
+        compress: gzipOn ? GZipCodec(level: 1).encoder : null,
         decompress: gzip.decode,
       );
 
@@ -196,5 +196,20 @@ void main() {
     };
     final cache = {for (final e in map.entries) e.key: json.encode(e.value)};
     expect(assembleDocument(cache), json.encode(map));
+  });
+
+  test('encodeDocument streams the same document as encode', () async {
+    // Several 64 KB pieces, with multi-byte characters across their edges.
+    final map = <String, dynamic>{
+      for (var i = 0; i < 3000; i++)
+        'k$i': i.isEven ? 'فاکتور شماره $i — 3 × ساعت مشاوره 😀' : {'n': i, 'ok': true},
+      'quote "x"': ['é', null, 2.5],
+    };
+    final cache = {for (final e in map.entries) e.key: json.encode(e.value)};
+    for (final gzipOn in [true, false]) {
+      final c = codec(gzipOn: gzipOn);
+      final bytes = await c.encodeDocument(cache);
+      expect((await c.decode(bytes)).plaintext, json.encode(map));
+    }
   });
 }

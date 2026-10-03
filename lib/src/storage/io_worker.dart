@@ -136,7 +136,7 @@ class _Worker {
           init.config,
           // Level 1: ~7x smaller for typical JSON at a fraction of the cost
           // of higher levels.
-          compress: GZipCodec(level: 1).encode,
+          compress: GZipCodec(level: 1).encoder,
           decompress: gzip.decode,
         );
   final WorkerInit init;
@@ -398,6 +398,19 @@ class _Worker {
       await _compact();
       return;
     }
+    // A record this large would be folded into a snapshot right after it is
+    // written (it is at least as many bytes as its text has characters), so
+    // write the snapshot straight away: just as durable, and the record is
+    // never built.
+    var size = _logBytes;
+    set.forEach((k, v) => size += k.length + v.length);
+    for (final k in del) {
+      size += k.length;
+    }
+    if (size > max(_minLogBytesBeforeCompaction, _snapshotBytes)) {
+      await _compact();
+      return;
+    }
 
     final record = await _codec.encodeLogRecord(_payload(set, del), fingerprint, _seq);
     try {
@@ -449,7 +462,7 @@ class _Worker {
   /// empty log for it. Each file is replaced atomically.
   Future<void> _compact() async {
     _idle?.cancel();
-    final bytes = await _codec.encode(assembleDocument(_cache));
+    final bytes = await _codec.encodeDocument(_cache);
     await _atomicWrite(init.mainPath, bytes);
     await _atomicWrite(init.backupPath, bytes);
     await _resetLog(await StorageCodec.fingerprintOf(bytes), bytes.length);

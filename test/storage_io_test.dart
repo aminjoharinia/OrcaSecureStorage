@@ -344,6 +344,22 @@ void main() {
     expect((await reopen('nopw', 'nopw_r', password: null)).read('x'), [1, 'two']);
   });
 
+  test('a save too large for the log is written as a snapshot', () async {
+    await OrcaSecureStorage.init(container: 'bulk', password: _password);
+    final box = OrcaSecureStorage(container: 'bulk');
+    box.write('small', 1);
+    await box.flush();
+    final logBefore = file('bulk.osslog').lengthSync();
+    for (var i = 0; i < 2000; i++) {
+      box.writeInMemory('k$i', 'value $i ' * 10); // ~200 KB in one save
+    }
+    await box.flush();
+    expect(file('bulk.osslog').lengthSync(), lessThanOrEqualTo(logBefore));
+    final copy = await reopen('bulk', 'bulk_r');
+    expect(copy.read('small'), 1);
+    expect(copy.read('k1999'), 'value 1999 ' * 10);
+  });
+
   test('a burst of awaited writes does not block the event loop', () async {
     // Each awaited write used to queue its own save; the thousands of empty
     // saves left after the loop then ran back to back (~200 ms freeze).
