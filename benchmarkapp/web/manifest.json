@@ -1,6 +1,6 @@
 {
-    "name": "storage_benchmark",
-    "short_name": "storage_benchmark",
+    "name": "Orca Benchmark",
+    "short_name": "Orca Benchmark",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

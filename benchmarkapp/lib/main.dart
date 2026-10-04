@@ -58,7 +58,7 @@ class BenchmarkApp extends StatelessWidget {
     return ValueListenableBuilder(
       valueListenable: themeMode,
       builder: (context, mode, _) => MaterialApp(
-        title: 'Storage Benchmark',
+        title: 'Orca Benchmark',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(Brightness.light),
         darkTheme: buildTheme(Brightness.dark),
@@ -146,6 +146,11 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
       // BENCH_ENTRIES / BENCH_STORAGES in the environment override the
       // dart-defines, so one build can run each storage in its own process.
       final env = environment();
+      // Own storage names, so a headless run never shares files (or Hive's
+      // lock) with an open copy of the app.
+      if (env['BENCH_PREFIX'] case final prefix? when prefix.isNotEmpty) {
+        storagePrefix = prefix;
+      }
       final entries = int.tryParse(env['BENCH_ENTRIES'] ?? '') ?? _autorunEntries;
       final storages = env['BENCH_STORAGES'] ?? _autorunStorages;
       final limit = int.tryParse(env['BENCH_LIMIT'] ?? '') ?? _autorunLimit;
@@ -498,25 +503,21 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
     final scheme = theme.colorScheme;
     return Row(
       children: [
-        Container(
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF6366F1), Color(0xFFA855F7)],
-            ),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.asset(
+            'assets/app_icon.png',
+            width: 46,
+            height: 46,
+            filterQuality: FilterQuality.medium,
           ),
-          child: const Icon(Icons.speed_rounded, color: Colors.white),
         ),
         const SizedBox(width: 14),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Storage Benchmark', style: theme.textTheme.headlineSmall),
+              Text('Orca Benchmark', style: theme.textTheme.headlineSmall),
               const SizedBox(height: 2),
               Text(
                 '${platformName()} · $_buildMode build · '
@@ -848,6 +849,8 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
                 cells: (r) => _memoryCells(
                   memory.firstWhere((m) => m.$1 == r.adapter).$2,
                 ),
+                // Longer headers ("After reading all MB") need the room.
+                minColumnWidth: 136,
               ),
               const SizedBox(height: 12),
               Text(

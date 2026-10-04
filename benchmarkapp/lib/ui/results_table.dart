@@ -33,6 +33,7 @@ class ResultsTable extends StatelessWidget {
     required this.headers,
     required this.results,
     required this.cells,
+    this.minColumnWidth = 104,
   });
 
   /// Titles of the number columns (the storage column comes first).
@@ -41,6 +42,9 @@ class ResultsTable extends StatelessWidget {
 
   /// The number cells of a row, one per header.
   final List<ResultCell> Function(AdapterResult) cells;
+
+  /// Narrowest a number column gets (wider when its content needs it).
+  final double minColumnWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -105,9 +109,9 @@ class ResultsTable extends StatelessWidget {
           // Only the name column flexes: it takes the slack, so the table
           // is exactly as wide as the card unless the numbers need more.
           columnWidths: const {0: IntrinsicColumnWidth(flex: 1)},
-          defaultColumnWidth: const MaxColumnWidth(
-            IntrinsicColumnWidth(),
-            FixedColumnWidth(104),
+          defaultColumnWidth: MaxColumnWidth(
+            const IntrinsicColumnWidth(),
+            FixedColumnWidth(minColumnWidth),
           ),
           children: [
             TableRow(

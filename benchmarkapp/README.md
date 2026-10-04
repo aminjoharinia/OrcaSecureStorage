@@ -1,8 +1,10 @@
-# Storage Benchmark app
+# Orca Benchmark
 
 A Flutter app that compares key-value storages in a real app, on every
 platform, in the style of the get_storage benchmark: **read / write / delete**
 tabs, integers vs strings, 10–100,000 entries (500 by default), and memory.
+
+![Orca Benchmark on macOS: the write results for 1,000 entries per storage and value type, on a log scale, with the summary table below](screenshots/orca_benchmark.webp)
 
 | Label | Storage | Encryption |
 |---|---|---|
@@ -127,7 +129,7 @@ flutter build macos --release -t lib/memory_main.dart
 ```
 
 ```bash
-MEM_STORAGE='Hive CE' MEM_PHASE=clear build/macos/Build/Products/Release/storage_benchmark.app/Contents/MacOS/storage_benchmark
+MEM_STORAGE='Hive CE' MEM_PHASE=clear "build/macos/Build/Products/Release/Orca Benchmark.app/Contents/MacOS/Orca Benchmark"
 ```
 
 Then `MEM_PHASE=write`, then `MEM_PHASE=open`. Besides held and peak memory,
@@ -146,14 +148,16 @@ Run each storage in its own process: storages that run out of time
 down whatever is measured after them in the same process. With one build,
 `BENCH_ENTRIES` and `BENCH_STORAGES` (full names, comma-separated) in the
 environment override `ENTRIES` and `STORAGES` (and `BENCH_LIMIT` overrides
-`LIMIT`):
+`LIMIT`). `BENCH_PREFIX` (and `MEM_PREFIX` for the memory benchmark's child
+processes) gives the run its own storage names, so it never shares files, or
+Hive's file lock, with an open copy of the app:
 
 ```bash
 flutter build macos --release --dart-define=AUTORUN=true --dart-define=MEMORY=after --dart-define=KINDS=strings
 ```
 
 ```bash
-BENCH_ENTRIES=50000 BENCH_STORAGES='Hive CE (encrypted)' build/macos/Build/Products/Release/storage_benchmark.app/Contents/MacOS/storage_benchmark
+BENCH_ENTRIES=50000 BENCH_STORAGES='Hive CE (encrypted)' "build/macos/Build/Products/Release/Orca Benchmark.app/Contents/MacOS/Orca Benchmark"
 ```
 
 ## Platform notes

@@ -114,3 +114,5 @@ the first run took 736 ms instead of 5.5 ms).
 | get_secure_storage 1.0.5 🔒 | 9 | 17 | stopped | stopped | stopped |
 | get_storage | 19 | 4 | stopped | not run | not run |
 | sqflite | 0 | 1 | 1 | 2 | stopped |
+
+Superseded by [2026-10-04_comparison_40s.md](2026-10-04_comparison_40s.md), measured with a 40 s limit for every operation and phase.

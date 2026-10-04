@@ -80,7 +80,7 @@ Future<void> runMemoryChild() async {
           .ceil();
 
   // Own names: the parent app may still have its timing-run storages open.
-  storagePrefix = 'mem';
+  storagePrefix = Platform.environment['MEM_PREFIX'] ?? 'mem';
   final adapters = allAdapters();
   final adapter = adapters.where((a) => a.name == name).firstOrNull;
   if (adapter == null) {
