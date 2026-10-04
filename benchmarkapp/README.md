@@ -2,7 +2,7 @@
 
 A Flutter app that compares key-value storages in a real app, on every
 platform, in the style of the get_storage benchmark: **read / write / delete**
-tabs, integers vs strings, 10–20,000 entries, and memory.
+tabs, integers vs strings, 10–100,000 entries (500 by default), and memory.
 
 | Label | Storage | Encryption |
 |---|---|---|
@@ -52,7 +52,7 @@ dark themes (follows the system by default; switch in the header).
 Calls are awaited one by one, the way app code usually uses these APIs (no
 batching); every 50 operations the loop gives the event loop a turn, as a real
 app would between user actions. Operations over 20 s are stopped and shown as
-"timeout". Entries: 10 to 20,000.
+"timeout". Entries: 10 to 100,000 (500 by default).
 
 "Saved" means what each API promises: Orca fsyncs its files; Hive, Sembast and
 GetStorage write without fsync; SharedPreferences on Apple platforms returns

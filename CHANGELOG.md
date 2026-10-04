@@ -1,3 +1,6 @@
+## [2.2.1]
+- Benchmark app only: 50k and 100k entries, and 500 entries selected by default. Same library code as 2.2.0.
+
 ## [2.2.0]
 - **New: `durability` setting.** `Durability.fsync` (the default, unchanged behaviour) fsyncs every save before it counts as saved. `Durability.os` hands change-log appends to the OS without fsync: nothing is lost if the app crashes, but an OS crash or power loss can lose the latest saves; snapshots are still fsynced and replaced atomically, so the container is never damaged, at worst it goes back to an earlier state. Pass it to `init` or the constructor; opening an open container with a different `durability` throws a `StateError`, like the other options. On a Mac the difference is not measurable (on Apple platforms `fsync` does not flush the drive's cache); phones, especially Android, usually pay more per fsync. The README compares what "saved" means for Orca, Hive, Sembast, GetStorage, SharedPreferences and sqflite.
 - **Web: saves are debounced.** Each web save encrypts and stores the whole container, so a save now waits 75 ms for more writes to join it (it happens at most 75 ms after the first unsaved change). `await flush()` stores at once, and so does hiding the tab.

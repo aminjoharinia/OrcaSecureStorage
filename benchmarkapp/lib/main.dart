@@ -82,7 +82,9 @@ class BenchmarkPage extends StatefulWidget {
 }
 
 class _BenchmarkPageState extends State<BenchmarkPage> {
-  static const _entryOptions = [10, 50, 100, 500, 1000, 5000, 10000, 15000, 20000];
+  static const _entryOptions = [
+    10, 50, 100, 500, 1000, 5000, 10000, 15000, 20000, 50000, 100000,
+  ];
 
   final _adapters = allAdapters();
   late final Set<StorageAdapter> _selected = {..._adapters};
@@ -92,7 +94,7 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
   /// while the benchmark runs.
   final _progress = ValueNotifier<(String, double)>(('', 0));
 
-  int _entriesIndex = 1;
+  int _entriesIndex = _entryOptions.indexOf(500);
   bool _logScale = false;
   Op _op = Op.write;
   final Set<Kind> _kinds = {...Kind.values};
