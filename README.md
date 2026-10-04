@@ -28,7 +28,7 @@ dependencies:
   orca_secure_storage:
     git:
       url: https://github.com/aminjoharinia/OrcaSecureStorage.git
-      ref: v2.4.1
+      ref: v2.4.2
 ```
 ### Install it
 
@@ -125,7 +125,7 @@ so does hiding the tab (switching away or closing it).
 
 ### Comparison with other storages
 Measured on an Apple Silicon Mac, release build, with the
-[benchmark app](benchmarkapp) (macOS, version 2.4.0). Each storage ran in its
+[Orca Benchmark](benchmarkapp) app (macOS, version 2.4.0). Each storage ran in its
 own process. Times include waiting until each storage counts the data as
 saved (see "Durability" above: OrcaSecureStorage fsyncs, most others do
 not). Speed uses strings of about 100 characters; memory uses JSON records
@@ -134,6 +134,8 @@ Anything that took longer than 40 s was stopped; "–" means not measured
 because writing the entries did not finish. The best (lowest) number of
 each column is in bold. Single runs, so small numbers vary by a few tenths
 of a millisecond or a few MB.
+
+![Orca Benchmark on macOS: the write results for 1,000 entries per storage and value type, on a log scale, with the summary table below](benchmarkapp/screenshots/orca_benchmark.webp)
 
 **Write every entry, until saved (ms)**
 

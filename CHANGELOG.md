@@ -1,3 +1,6 @@
+## [2.4.2]
+- README: screenshot of the Orca Benchmark app in "Comparison with other storages". Docs only; same code as 2.4.1.
+
 ## [2.4.1]
 - README: comparison tables measured again with a 40 s limit for every operation and memory phase (get_storage now finishes 5,000 writes, sqflite 100,000), the best number of each column in bold, and the summary recomputed (writes 7–24× and deletes 8–33× faster than encrypted Hive). Full results in `benchmarkapp/results/2026-10-04_comparison_40s.md`. Same library code as 2.4.0.
 - Benchmark app renamed **Orca Benchmark** (window, menus, launchers; on macOS the app is now `Orca Benchmark.app`), with a new stopwatch icon on a rounded tile for macOS, iOS, Android, web and Windows, also shown in its header. Wider columns in the memory table. A screenshot in its README. `BENCH_PREFIX` / `MEM_PREFIX` give a headless run its own storage names, so it can run while the app is open.
