@@ -31,6 +31,8 @@ const _autorunKinds = String.fromEnvironment('KINDS');
 // --dart-define=MEMORY=true: the autorun measures memory instead (desktop);
 // MEMORY=after: the timing benchmark first, then memory, as from the UI.
 const _autorunMemory = String.fromEnvironment('MEMORY');
+// --dart-define=LIMIT=60: time limit in seconds (20, 40, 60, 80 or 100).
+const _autorunLimit = int.fromEnvironment('LIMIT', defaultValue: 40);
 // light, dark or system (default).
 const _theme = String.fromEnvironment('THEME', defaultValue: 'system');
 
@@ -98,6 +100,15 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
   final _progress = ValueNotifier<(String, double)>(('', 0));
 
   int _entriesIndex = _entryOptions.indexOf(500);
+
+  /// Seconds after which a timing operation or a memory phase is stopped.
+  static const _limitOptions = [20, 40, 60, 80, 100];
+  int _limitIndex = _limitOptions.indexOf(40);
+  Duration get _limit => Duration(seconds: _limitOptions[_limitIndex]);
+
+  /// The limit of the last timing and memory runs.
+  int _resultLimit = 0;
+  int _memoryLimit = 0;
   bool _logScale = false;
   Op _op = Op.write;
   final Set<Kind> _kinds = {...Kind.values};
@@ -137,6 +148,8 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
       final env = environment();
       final entries = int.tryParse(env['BENCH_ENTRIES'] ?? '') ?? _autorunEntries;
       final storages = env['BENCH_STORAGES'] ?? _autorunStorages;
+      final limit = int.tryParse(env['BENCH_LIMIT'] ?? '') ?? _autorunLimit;
+      if (_limitOptions.contains(limit)) _limitIndex = _limitOptions.indexOf(limit);
       final i = _entryOptions.indexOf(entries);
       if (i >= 0) _entriesIndex = i;
       if (_autorunKinds.isNotEmpty) {
@@ -173,6 +186,7 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
         for (final k in Kind.values)
           if (_kinds.contains(k)) k,
       ],
+      budget: _limit,
     );
     _resultKinds = runner.kinds;
     if (!_resultKinds.contains(_summaryKind)) _summaryKind = _resultKinds.first;
@@ -182,6 +196,7 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
       _running = false;
       _results = results;
       _resultEntries = runner.entries;
+      _resultLimit = runner.budget.inSeconds;
     });
     // Also on the console (browser dev tools, `flutter run` output).
     debugPrint(_markdown(), wrapWidth: 100000);
@@ -195,12 +210,14 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
         if (_selected.contains(a)) a,
     ];
     final entries = _entries;
+    final limit = _limit;
     final rows = [for (final a in adapters) (a, MemoryRow())];
     _progress.value = ('Starting', 0);
     setState(() {
       _running = true;
       _memory = rows;
       _memoryEntries = entries;
+      _memoryLimit = limit.inSeconds;
     });
     const phases = ['clear', 'write', 'open'];
     for (final (i, (a, row)) in rows.indexed) {
@@ -210,11 +227,11 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
           (i * phases.length + j) / (rows.length * phases.length),
         );
         try {
-          final r = await runMemoryPhase(a.name, phase, entries);
+          final r = await runMemoryPhase(a.name, phase, entries, timeout: limit);
           if (phase == 'write') row.write = r;
           if (phase == 'open') row.open = r;
         } on TimeoutException {
-          row.problem = '$phase took over 30 s (stopped)';
+          row.problem = '$phase took over ${limit.inSeconds} s (stopped)';
         } catch (e) {
           row.problem = '$phase failed: $e';
         }
@@ -267,7 +284,8 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
     if (rows == null) return '';
     final b = StringBuffer()
       ..writeln(
-        'Memory — ${platformName()}, $_buildMode, $_memoryEntries records '
+        'Memory — ${platformName()}, $_buildMode, $_memoryEntries records, '
+        'limit $_memoryLimit s '
         '(${memoryJsonMB(_memoryEntries).toStringAsFixed(1)} MB of JSON)',
       )
       ..writeln()
@@ -288,7 +306,8 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
         r.timeouts[(op, k)] ?? r.results[(op, k)]?.ms.toStringAsFixed(1) ?? '–';
     final b = StringBuffer()
       ..writeln(
-        'Storage benchmark — ${platformName()}, $_buildMode, $_resultEntries entries',
+        'Storage benchmark — ${platformName()}, $_buildMode, $_resultEntries entries, '
+        'limit $_resultLimit s',
       )
       ..writeln()
       ..writeln('Summary (${_summaryKind.title}):')
@@ -603,6 +622,25 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
                   onSelected: _running
                       ? null
                       : (_) => setState(() => _entriesIndex = i),
+                ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          const SectionLabel('Time limit'),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final (i, sec) in _limitOptions.indexed)
+                ChoiceChip(
+                  label: Text('$sec s'),
+                  tooltip: 'Stop a timing operation or a memory phase '
+                      'that takes longer than $sec s',
+                  selected: i == _limitIndex,
+                  onSelected: _running
+                      ? null
+                      : (_) => setState(() => _limitIndex = i),
                 ),
             ],
           ),
@@ -982,8 +1020,8 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
           child: Text(
             'Times include waiting until the data is on disk. "Update 1" is one '
             'write into the full storage (median of 20). "Cold read" opens the '
-            'data from disk again and reads every key. Operations over 20 s are '
-            'stopped.',
+            'data from disk again and reads every key. Operations over '
+            '$_resultLimit s are stopped.',
             style: muted.copyWith(height: 1.5),
           ),
         ),

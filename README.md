@@ -28,7 +28,7 @@ dependencies:
   orca_secure_storage:
     git:
       url: https://github.com/aminjoharinia/OrcaSecureStorage.git
-      ref: v2.3.1
+      ref: v2.4.0
 ```
 ### Install it
 
@@ -279,7 +279,7 @@ against the container's JSON (UTF-8):
 | Copy | Records (maps, numbers, short strings) | Long string values |
 |---|---|---|
 | A value on the UI isolate before it is read (its JSON text) | about 1×; up to 2× | about 1×; up to 2.3× |
-| A value on the UI isolate once read or written (objects) | about 6× | about 2.5× |
+| A value on the UI isolate once read, or written with the default `write` (objects) | about 6× | about 2.5× |
 | The worker's JSON text | about 1×; up to 2× | about 1×; up to 2.3× |
 | The file on disk (compressed, encrypted) | about 0.1× | about 0.1× |
 
@@ -358,8 +358,53 @@ converted throws a `JsonUnsupportedObjectError` from `write` and is not
 stored. If you change a stored list or map in place, call `save()`.
 
 Opening a container that is already open returns the same instance. Pass
-the same `password` / `encryptionKey` / `path`, or none; different ones
-throw a `StateError`.
+the same `password` / `encryptionKey` / `path` / `durability` /
+`keepWrittenObjects`, or none; different ones throw a `StateError`.
+
+#### To write many values at once, use `writeAll`:
+```dart
+await box.writeAll({for (final r in records) 'r${r.id}': r.toJson()});
+```
+
+`writeAll` saves the entries together and keeps them as their JSON text,
+decoded again when read, instead of as the objects you passed. A bulk
+import then takes much less memory (see the table below). If any value
+cannot be converted to JSON, nothing is stored. Each call encodes its
+entries on the UI thread, so for large imports call it with about 1,000
+entries at a time (about 8 ms each).
+
+#### Keeping written values as text: `keepWrittenObjects`
+By default `write` keeps the object you wrote, and `read` returns that same
+object. With `keepWrittenObjects: false`, every `write` keeps the value's
+JSON text instead, as `writeAll` does:
+```dart
+await OrcaSecureStorage.init(encryptionKey: key, keepWrittenObjects: false);
+```
+
+What changes for values stored as text (with this option, or by
+`writeAll`): `read` returns a new object (decoded the first time it is read,
+a few microseconds for a typical record), not the instance you wrote; and
+changing that instance in place and calling `save()` does not store the
+change: `write` the value again. The default keeps today's behaviour.
+
+Memory the container added after writing, records of about 330 bytes of
+JSON, macOS release build (medians of 3 runs;
+[measurements](benchmarkapp/results/2026-10-04_write_memory.md)):
+
+| Records (JSON) | `write`, objects kept (default) | `keepWrittenObjects: false` | `writeAll`, 1,000 per call | Hive CE (encrypted) |
+|---|---:|---:|---:|---:|
+| 500 (0.2 MB) | 6 MB | 6 MB | 6 MB | 6 MB |
+| 1,000 (0.3 MB) | 9 MB | 7 MB | 8 MB | 7 MB |
+| 5,000 (1.6 MB) | 30 MB | 22 MB | 24 MB | 15 MB |
+| 10,000 (3.2 MB) | 44 MB | 31 MB | 33 MB | 24 MB |
+| 100,000 (32 MB) | 277 MB | 113 MB | 115 MB | 182 MB |
+
+Up to about 1,000 records the difference is within the fixed cost of the
+container (its background isolate), so keep the default. From about 5,000
+records, and for imports and syncs, text saves a quarter to three fifths of
+the memory; writing is as fast or slightly faster. Reopening the data later
+is the same either way: values are always decoded when first read after
+opening.
 
 #### To read values you use `read`:
 ```dart

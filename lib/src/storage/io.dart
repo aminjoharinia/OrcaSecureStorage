@@ -218,10 +218,26 @@ class StorageImpl {
     _encoded.remove(key);
   }
 
+  /// False: written values are kept as their JSON text ([RawJson]) and
+  /// decoded when read, instead of as the objects written.
+  bool keepWrittenObjects = true;
+
   void write(String key, dynamic value) {
     final encoded = json.encode(value); // throws before anything changes
+    _store(key, value, encoded, asText: !keepWrittenObjects);
+  }
+
+  /// Every value as text, see `OrcaSecureStorage.writeAll`.
+  void writeAll(Map<String, dynamic> values) {
+    // Encode everything first: a value that cannot be encoded throws
+    // before anything is stored.
+    final encoded = {for (final e in values.entries) e.key: json.encode(e.value)};
+    values.forEach((key, value) => _store(key, value, encoded[key]!, asText: true));
+  }
+
+  void _store(String key, dynamic value, String encoded, {required bool asText}) {
     subject
-      ..value![key] = value
+      ..value![key] = asText ? RawJson(encoded) : value
       ..changeValue(key, value);
     _dirty.add(key);
     _encoded[key] = encoded;

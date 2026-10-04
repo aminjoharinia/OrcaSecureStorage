@@ -131,6 +131,17 @@ class StorageImpl {
       ..changeValue(key, null);
   }
 
+  /// Not used on the web, which keeps every value decoded.
+  bool keepWrittenObjects = true;
+
+  void writeAll(Map<String, dynamic> values) {
+    // Refuse the whole batch if any value cannot be encoded.
+    for (final v in values.values) {
+      json.encode(v);
+    }
+    values.forEach(write);
+  }
+
   void write(String key, dynamic value) {
     // Refuse a value that cannot be encoded before storing it; every flush
     // encodes the whole container, so one bad value would stop all saves.

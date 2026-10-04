@@ -141,7 +141,18 @@ Future<void> runMemoryChild() async {
   lastTick = sw.elapsedMilliseconds;
   var found = 0;
   var firstReadUs = 0;
-  if (phase == 'write') {
+  // MEM_BATCH=1000: write through writeAll, that many records at a time.
+  final batch = int.tryParse(env['MEM_BATCH'] ?? '') ?? 0;
+  if (phase == 'write' && batch > 0) {
+    for (var i = 0; i < count; i += batch) {
+      await adapter.writeAll({
+        for (var j = i; j < i + batch && j < count; j++) 'r$j': memoryRecord(j),
+      });
+      await Future<void>.delayed(Duration.zero);
+    }
+    await adapter.flush();
+    found = count;
+  } else if (phase == 'write') {
     for (var i = 0; i < count; i++) {
       await adapter.write('r$i', memoryRecord(i));
       if ((i + 1) % 50 == 0) await Future<void>.delayed(Duration.zero);

@@ -51,7 +51,8 @@ dark themes (follows the system by default; switch in the header).
 
 Calls are awaited one by one, the way app code usually uses these APIs (no
 batching); every 50 operations the loop gives the event loop a turn, as a real
-app would between user actions. Operations over 20 s are stopped and shown as
+app would between user actions. Operations that take longer than the time
+limit (20, 40, 60, 80 or 100 s; 40 s by default) are stopped and shown as
 "timeout". Entries: 10 to 100,000 (500 by default).
 
 "Saved" means what each API promises: Orca fsyncs its files; Hive, Sembast and
@@ -80,7 +81,7 @@ Linux, Windows and iOS: `flutter run --release -d linux` / `-d windows` /
 Headless run (prints a Markdown table and JSON, saves screenshots, exits; not on
 the web; `--dart-define=THEME=light` or `dark` picks the theme;
 `--dart-define=STORAGES=sqflite,Hive CE (encrypted)` runs only those storages,
-by full name):
+by full name; `--dart-define=LIMIT=60` sets the time limit):
 
 ```bash
 flutter run --release -d macos --dart-define=AUTORUN=true --dart-define=ENTRIES=100 --dart-define=KINDS=integers,json
@@ -108,7 +109,7 @@ storage, three fresh processes run one phase each:
 The chart shows the peak memory each storage added; the table also shows
 what it still held two seconds after each phase (memory freed after a peak
 usually stays with the process), the times, and the longest UI stall. A
-phase that takes over 30 s is stopped. Mobile and web cannot start child
+phase that takes longer than the time limit is stopped. Mobile and web cannot start child
 processes, so the button is disabled there.
 
 Headless (prints a Markdown table, saves a screenshot, exits; `MEMORY=after`
@@ -131,10 +132,11 @@ MEM_STORAGE='Hive CE' MEM_PHASE=clear build/macos/Build/Products/Release/storage
 
 Then `MEM_PHASE=write`, then `MEM_PHASE=open`. Besides held and peak memory,
 the `MEMORY` line has the memory right after opening (`afterOpenMB`), the
-time of opening alone (`openMs`), the first read (`firstReadUs`), and with
-`MEM_STALL=1` the longest UI stall while opening and during the rest
-(`openStallMs`, `restStallMs`; a stall still going on at the end of a part
-counts too). `MEM_STORAGE` is a storage's
+time of opening alone (`openMs`) and the first read (`firstReadUs`). With
+`MEM_STALL=1` it also has the longest UI stall while opening and during the
+rest (`openStallMs`, `restStallMs`; a stall still going on at the end of a
+part counts too). `MEM_BATCH=1000` makes `write` use `writeAll`, that many
+records per call. `MEM_STORAGE` is a storage's
 full name as in the results tables. Saved runs are in [`results/`](results).
 
 ### Comparing storages fairly
@@ -143,7 +145,8 @@ Run each storage in its own process: storages that run out of time
 (GetStorage, get_secure_storage) keep saving in the background and slow
 down whatever is measured after them in the same process. With one build,
 `BENCH_ENTRIES` and `BENCH_STORAGES` (full names, comma-separated) in the
-environment override `ENTRIES` and `STORAGES`:
+environment override `ENTRIES` and `STORAGES` (and `BENCH_LIMIT` overrides
+`LIMIT`):
 
 ```bash
 flutter build macos --release --dart-define=AUTORUN=true --dart-define=MEMORY=after --dart-define=KINDS=strings

@@ -65,7 +65,7 @@ class OrcaAdapter extends StorageAdapter {
     OrcaMode.none => 'Orca',
   };
   @override
-  String get package => 'orca_secure_storage 2.3.1';
+  String get package => 'orca_secure_storage 2.4.0';
   @override
   String get encryption => switch (mode) {
     OrcaMode.password => 'AES-256-GCM, PBKDF2 key',
@@ -90,6 +90,8 @@ class OrcaAdapter extends StorageAdapter {
   Future<void> clear() => _box.erase();
   @override
   Future<void> write(String key, Object value) => _box.write(key, value);
+  @override
+  Future<void> writeAll(Map<String, Object> entries) => _box.writeAll(entries);
   @override
   Future<Object?> read(String key) async => _box.read(key);
   @override

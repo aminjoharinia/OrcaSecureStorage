@@ -396,6 +396,47 @@ void main() {
     expect(r4.listenable.value, {'a': {'list': [1, 2, 3]}, 'b': {'n': 2}});
   });
 
+  test('writeAll keeps values as text, saves them together, refuses a bad batch', () async {
+    await OrcaSecureStorage.init(container: 'wall', password: _password);
+    final box = OrcaSecureStorage(container: 'wall');
+    final record = {'id': 1, 'tags': ['a']};
+    await box.writeAll({'r1': record, 'r2': {'id': 2}, 'n': 3});
+    final r1 = box.read<Map<String, dynamic>>('r1');
+    expect(r1, record);
+    expect(identical(r1, record), isFalse, reason: 'stored as text, read decodes');
+    expect(box.read('r1'), same(r1), reason: 'decoded once, then kept');
+
+    expect(() => box.writeAll({'ok': 1, 'bad': Object()}),
+        throwsA(isA<JsonUnsupportedObjectError>()));
+    expect(box.read('ok'), isNull, reason: 'nothing of a refused batch is stored');
+
+    await box.flush();
+    final copy = await reopen('wall', 'wall_r');
+    expect(copy.read('r1'), record);
+    expect(copy.read('r2'), {'id': 2});
+    expect(copy.read('n'), 3);
+    expect(copy.getKeys<Iterable<String>>().toList(), ['r1', 'r2', 'n']);
+  });
+
+  test('keepWrittenObjects: false keeps written values as text', () async {
+    await OrcaSecureStorage.init(
+        container: 'text', password: _password, keepWrittenObjects: false);
+    final box = OrcaSecureStorage(container: 'text');
+    final value = {'list': [1, 2]};
+    box.write('v', value);
+    expect(box.read('v'), value);
+    expect(identical(box.read('v'), value), isFalse);
+    // A change made in place to the written object is not stored.
+    (value['list'] as List).add(3);
+    await box.save();
+    await box.flush();
+    expect((await reopen('text', 'text_r')).read('v'), {'list': [1, 2]});
+
+    expect(() => OrcaSecureStorage(container: 'text', keepWrittenObjects: true),
+        throwsStateError);
+    expect(OrcaSecureStorage(container: 'text', keepWrittenObjects: false), same(box));
+  });
+
   test('Durability.os appends to the log and reopens the same data', () async {
     await OrcaSecureStorage.init(container: 'dur', password: _password, durability: Durability.os);
     final box = OrcaSecureStorage(container: 'dur');

@@ -42,7 +42,8 @@ class OrcaSecureStorage {
       String? path,
       Map<String, dynamic>? initialData,
       bool migrateUnencrypted = false,
-      Durability? durability}) {
+      Durability? durability,
+      bool? keepWrittenObjects}) {
     if (encryptionKey != null && encryptionKey.length != 32) {
       throw ArgumentError.value(
           encryptionKey.length, 'encryptionKey', 'must be 32 bytes (AES-256)');
@@ -58,6 +59,9 @@ class OrcaSecureStorage {
         if (migrateUnencrypted && !open._migrateUnencrypted)
           'migrateUnencrypted',
         if (durability != null && durability != open._durability) 'durability',
+        if (keepWrittenObjects != null &&
+            keepWrittenObjects != open._concrete.keepWrittenObjects)
+          'keepWrittenObjects',
       ];
       if (conflict.isNotEmpty) {
         throw StateError('Container "$container" is already open with a '
@@ -68,6 +72,7 @@ class OrcaSecureStorage {
     }
     final instance = OrcaSecureStorage._internal(container, path, initialData,
         password, migrateUnencrypted, encryptionKey, durability ?? Durability.fsync);
+    instance._concrete.keepWrittenObjects = keepWrittenObjects ?? true;
     _sync[container] = instance;
     return instance;
   }
@@ -139,19 +144,27 @@ class OrcaSecureStorage {
   ///
   /// [durability] (files only) decides whether saves are fsynced before they
   /// count as saved: [Durability.fsync] (the default) or [Durability.os].
+  ///
+  /// [keepWrittenObjects] (files only, default true): with false, `write`
+  /// keeps a value as its JSON text (decoded again when read) instead of
+  /// the object you wrote, which takes several times less memory. Then
+  /// `read` returns a new object, and a change made in place to the object
+  /// you wrote is not saved by [save]: write the value again instead.
   static Future<bool> init(
       {String container = defaultContainer,
       String? password,
       List<int>? encryptionKey,
       bool migrateUnencrypted = false,
-      Durability? durability}) {
+      Durability? durability,
+      bool? keepWrittenObjects}) {
     initImpl();
     return OrcaSecureStorage(
             container: container,
             password: password,
             encryptionKey: encryptionKey,
             migrateUnencrypted: migrateUnencrypted,
-            durability: durability)
+            durability: durability,
+            keepWrittenObjects: keepWrittenObjects)
         .initStorage;
   }
 
@@ -214,6 +227,18 @@ class OrcaSecureStorage {
   /// away and nothing is stored.
   Future<void> write(String key, dynamic value) {
     writeInMemory(key, value);
+    return _tryFlush();
+  }
+
+  /// Writes every entry of [values], as [write] does for one, saved
+  /// together. Whatever `keepWrittenObjects` is, the values are kept as
+  /// their JSON text and decoded when read (files; the web keeps objects), so
+  /// a large import does not keep every value in memory as objects: read
+  /// returns new objects, and a change made in place to an object you
+  /// passed is not saved by [save]. If any value cannot be converted to
+  /// JSON, a [JsonUnsupportedObjectError] is thrown and nothing is stored.
+  Future<void> writeAll(Map<String, dynamic> values) {
+    _concrete.writeAll(values);
     return _tryFlush();
   }
 

@@ -20,7 +20,7 @@ abstract class StorageAdapter {
   /// Short label under the chart bars.
   String get label;
 
-  /// Package, e.g. `orca_secure_storage 2.3.1`.
+  /// Package, e.g. `orca_secure_storage 2.4.0`.
   String get package;
 
   /// `none`, or the cipher / mechanism used.
@@ -38,6 +38,14 @@ abstract class StorageAdapter {
   Future<void> clear();
 
   Future<void> write(String key, Object value);
+
+  /// Several entries at once; storages without a batch API write them one
+  /// by one.
+  Future<void> writeAll(Map<String, Object> entries) async {
+    for (final e in entries.entries) {
+      await write(e.key, e.value);
+    }
+  }
   Future<Object?> read(String key);
   Future<void> delete(String key);
 

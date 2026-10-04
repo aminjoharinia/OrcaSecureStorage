@@ -1,6 +1,8 @@
 @TestOn('browser')
 library;
 
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orca_secure_storage/orca_secure_storage.dart';
 import 'package:web/web.dart' as web;
@@ -40,6 +42,21 @@ void main() {
     await box.flush();
     expect(sw.elapsedMilliseconds, lessThan(60), reason: 'flush() does not wait');
     expect(stored('deb'), isNot(afterBurst));
+  });
+
+  test('writeAll stores every value and refuses a bad batch', () async {
+    web.window.localStorage.removeItem('wall');
+    await OrcaSecureStorage.init(container: 'wall', password: 'pw');
+    final box = OrcaSecureStorage(container: 'wall');
+    await box.writeAll({'a': 1, 'b': {'x': 2}});
+    expect(() => box.writeAll({'ok': 1, 'bad': Object()}), throwsA(isA<JsonUnsupportedObjectError>()));
+    expect(box.read('ok'), isNull);
+    await box.flush();
+    web.window.localStorage.setItem('wall_copy', web.window.localStorage.getItem('wall')!);
+    await OrcaSecureStorage.init(container: 'wall_copy', password: 'pw');
+    final copy = OrcaSecureStorage(container: 'wall_copy');
+    expect(copy.read('a'), 1);
+    expect(copy.read('b'), {'x': 2});
   });
 
   test('stored data reads back after reopening', () async {
