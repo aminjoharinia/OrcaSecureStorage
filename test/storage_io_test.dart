@@ -363,6 +363,39 @@ void main() {
     expect((await reopen('nopw', 'nopw_r', password: null)).read('x'), [1, 'two']);
   });
 
+  test('values are decoded when first read, and saved correctly either way', () async {
+    await OrcaSecureStorage.init(container: 'lazy', password: _password);
+    final box = OrcaSecureStorage(container: 'lazy');
+    box.write('a', {'list': [1, 2]});
+    box.write('b', {'n': 2});
+    box.write('c', 'three');
+    await box.flush();
+
+    final r = await reopen('lazy', 'lazy_r');
+    expect(r.getKeys<Iterable<String>>().toList(), ['a', 'b', 'c']);
+    final a = r.read<Map<String, dynamic>>('a')!;
+    expect(a, {'list': [1, 2]});
+    expect(r.read('a'), same(a), reason: 'later reads return the decoded object');
+
+    // An in-place change to a read value is saved by save(); the values
+    // never read ('b', 'c') are saved from their stored text.
+    (a['list'] as List).add(3);
+    r.remove('c');
+    await r.save();
+    await r.flush();
+    final r2 = await reopen('lazy_r', 'lazy_r2');
+    expect(r2.read('a'), {'list': [1, 2, 3]});
+    expect(r2.read('b'), {'n': 2});
+    expect(r2.read('c'), isNull);
+    expect(r2.getKeys<Iterable<String>>().toList(), ['a', 'b']);
+
+    // Whole-map access never hands out undecoded values.
+    final r3 = await reopen('lazy_r', 'lazy_r3');
+    expect(r3.getValues<Iterable>().toList(), [{'list': [1, 2, 3]}, {'n': 2}]);
+    final r4 = await reopen('lazy_r', 'lazy_r4');
+    expect(r4.listenable.value, {'a': {'list': [1, 2, 3]}, 'b': {'n': 2}});
+  });
+
   test('Durability.os appends to the log and reopens the same data', () async {
     await OrcaSecureStorage.init(container: 'dur', password: _password, durability: Durability.os);
     final box = OrcaSecureStorage(container: 'dur');

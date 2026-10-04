@@ -28,7 +28,7 @@ dependencies:
   orca_secure_storage:
     git:
       url: https://github.com/aminjoharinia/OrcaSecureStorage.git
-      ref: v2.2.1
+      ref: v2.3.0
 ```
 ### Install it
 
@@ -131,16 +131,20 @@ A container lives in memory twice, on purpose:
 ┌────────────────────────────┐  changed   ┌─────────────────────────────────────┐
 │ Map<String, dynamic>       │  keys as   │ each key's JSON text                │
 │  read() answers from here, │  JSON ───▶ │  appends changes to the log; builds │
-│  synchronously             │            │  snapshots: join, gzip, encrypt,    │
-│ write() encodes one value  │            │  write temp file, fsync, rename     │
+│  synchronously; decodes a  │            │  snapshots: join, gzip, encrypt,    │
+│  value when first read     │            │  write temp file, fsync, rename     │
+│ write() encodes one value  │            │                                     │
 └────────────────────────────┘            └─────────────────────────────────────┘
 ```
 
-1. **The decoded objects on the UI isolate** are what `read` returns, so
-   reads are instant and need no `await`. This is the larger copy.
-2. **The worker's copy** holds every key's JSON text; it is the smaller
-   copy. Dart isolates do not share memory, so the worker keeps its own. With it, the worker can
-   build a new snapshot (join the JSON, compress, encrypt, write) whenever it
+1. **The UI isolate's map** is what `read` answers from, so reads are
+   instant and need no `await`. After opening, each value is still its JSON
+   text: `read` decodes a value the first time it is asked for it (a few
+   microseconds for a typical record) and keeps the result, so later reads
+   return the same object. Values you write are kept as objects.
+2. **The worker's copy** holds every key's JSON text. Dart isolates do not
+   share objects, so the worker keeps its own. With it, the worker can build
+   a new snapshot (join the JSON, compress, encrypt, write) whenever it
    likes, without asking the UI isolate for anything.
 
 The second copy is what keeps the UI smooth: a `write` only encodes the value
@@ -148,34 +152,37 @@ you wrote, never the whole container. Without the copy, every snapshot would
 mean encoding the whole container on the UI thread, about 100 ms at 15 MB,
 which drops frames.
 
-The cost is memory, and the two copies are not the same size. Measured
-after garbage collection on a 64-bit desktop, against the container's JSON
-(UTF-8):
+The cost is memory. Measured after garbage collection on a 64-bit desktop,
+against the container's JSON (UTF-8):
 
 | Copy | Records (maps, numbers, short strings) | Long string values |
 |---|---|---|
-| Decoded objects on the UI isolate | about 6× | about 2.5× |
+| A value on the UI isolate before it is read (its JSON text) | about 1×; up to 2× | about 1×; up to 2.3× |
+| A value on the UI isolate once read or written (objects) | about 6× | about 2.5× |
 | The worker's JSON text | about 1×; up to 2× | about 1×; up to 2.3× |
 | The file on disk (compressed, encrypted) | about 0.1× | about 0.1× |
 
-The worker's copy reaches the upper figure when strings contain characters
-outside Latin-1 (Persian, Arabic, CJK, emoji, even `—` or `×`), which Dart
-stores at 2 bytes per character. On phones Dart uses 4-byte pointers, so
-the decoded objects are likely somewhat smaller there.
+Text reaches the upper figure when strings contain characters outside
+Latin-1 (Persian, Arabic, CJK, emoji, even `—` or `×`), which Dart stores at
+2 bytes per character. On phones Dart uses 4-byte pointers, so the decoded
+objects are likely somewhat smaller there. Code that reads every value
+(`getValues()`, `listenable`, or a loop over all keys) decodes all of them,
+so the container then costs its full decoded size.
 
 On top of that come short peaks. Writing a snapshot builds the document in
 pieces of about 64 KB and compresses each one right away, so it only holds
 the compressed output (about 0.1×) in full, and a large save (such as a bulk
-import) goes straight to a snapshot. Opening a container decodes it only
-once: the worker cuts the file into each key's JSON text without decoding
-it, and a short-lived helper isolate decodes the document and hands the
-objects to the UI isolate without copying them, so opening does not block
-the UI. Meanwhile a few copies of the text exist briefly. Memory freed after
-a peak is usually kept by the process rather than returned to the OS.
+import) goes straight to a snapshot. Opening a container does not decode
+it: the worker and a short-lived helper isolate cut the file into each
+key's JSON text, and the helper hands the result to the UI isolate without
+copying it, so opening does not block the UI (the longest stall measured
+at 100,000 entries was 6 ms). Memory freed after a peak is usually kept by
+the process rather than returned to the OS.
 
 For a container with 15 MB of record-like JSON, a release build on macOS
-adds about 130 MB to the process after writing it and about 200 MB after
-opening it ([measurements](benchmarkapp/results/2026-10-04_memory_open.md)).
+adds about 140 MB to the process after writing it, about 100–115 MB right
+after opening it, and about 160 MB once every value has been read
+([measurements](benchmarkapp/results/2026-10-04_decode_on_read.md)).
 Containers up to a few MB (settings, tokens, cached records) cost little.
 For larger data, split it across several containers or use a database.
 

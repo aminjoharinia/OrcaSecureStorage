@@ -95,6 +95,9 @@ class StorageImpl {
     return subject.value!.keys as T;
   }
 
+  /// Values are decoded when the container is opened here.
+  void decodeAll() {}
+
   T getValues<T>() {
     return subject.value!.values as T;
   }

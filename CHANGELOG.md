@@ -1,3 +1,10 @@
+## [2.3.0]
+- **Values are decoded when first read.** Opening a container no longer decodes every value: the UI isolate receives each value's JSON text and `read` decodes a value the first time it is asked for it (microseconds for a typical record), keeping the result. Reads stay synchronous, later reads return the same object, and `save()` still saves changes made in place. `getValues()` and `listenable` decode everything first. Files only; the web still decodes when opening.
+- **Opening no longer stalls the UI, uses half the memory and is faster.** Opening 100,000 records (32 MB of JSON) on macOS, release build: longest UI stall 14–23 ms → 5–6 ms (the rest is the platform's documents-folder lookup), memory right after opening 403 → 190 MB, open time 445 → 267 ms. 2.2.1 decoded about a million objects in a burst, and their garbage collection paused the UI isolate too. At 15 MB of JSON: about 100–115 MB after opening instead of about 200 MB. Encrypted Hive, for comparison, blocks the UI for its whole open (about 870 ms at 100,000 records) and holds 313 MB after opening.
+- The helper isolate now gets the snapshot's compressed bytes instead of a copy of its text, and the worker decompresses in chunks.
+- README: memory section updated (a value takes about 1× its JSON until read, about 6× once decoded).
+- Benchmark app: the UI-stall meter also counts a stall still in progress at the end of a phase. Earlier results under-reported stalls that lasted until a phase ended, notably Hive's whole open (corrected in the results files). The memory mode reports memory right after opening, the first read, and stalls of opening and the rest separately. Results in `benchmarkapp/results/2026-10-04_decode_on_read.md`.
+
 ## [2.2.1]
 - Benchmark app only: 50k and 100k entries, and 500 entries selected by default. Same library code as 2.2.0.
 

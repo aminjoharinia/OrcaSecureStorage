@@ -27,7 +27,7 @@ void main() {
           kdfIterations: 1000,
         ),
         compress: gzipOn ? GZipCodec(level: 1).encoder : null,
-        decompress: gzip.decode,
+        decompress: gzip.decoder,
       );
 
   group('format 2', () {
@@ -196,6 +196,21 @@ void main() {
     };
     final cache = {for (final e in map.entries) e.key: json.encode(e.value)};
     expect(assembleDocument(cache), json.encode(map));
+  });
+
+  test('a compressed file decodes to the same text and keeps its compressed bytes', () async {
+    final map = <String, dynamic>{
+      for (var i = 0; i < 5000; i++) 'k$i': {'n': i, 's': 'فاکتور $i — ×'},
+    };
+    final c = codec();
+    final doc = await c.decode(await c.encode(json.encode(map)));
+    expect(doc.plaintext, json.encode(map));
+    expect(doc.compressed, isNotNull);
+    expect(doc.compressed!.length, lessThan(doc.plaintext.length));
+    expect(json.decode(utf8.decode(gzip.decode(doc.compressed!))), map);
+    // Uncompressed files have no compressed bytes to offer.
+    expect((await codec(gzipOn: false).decode(await codec(gzipOn: false).encode('{}'))).compressed,
+        isNull);
   });
 
   test('splitDocument is the reverse of assembleDocument', () {

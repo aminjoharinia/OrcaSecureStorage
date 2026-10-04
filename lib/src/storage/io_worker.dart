@@ -75,22 +75,39 @@ class WorkerReady {
   final List<String> warnings;
 }
 
-/// The stored container, decoded. Sent with `Isolate.exit` by a short-lived
-/// helper isolate, so the UI isolate receives the objects without copying
-/// them and without decoding on its own thread.
+/// A stored value not decoded yet: its JSON text. The UI isolate decodes it
+/// the first time it is read, so opening a container does not build every
+/// value's objects (about 6× the JSON in memory, and a burst of allocation
+/// whose garbage collection pauses the UI isolate too).
+class RawJson {
+  const RawJson(this.json);
+  final String json;
+}
+
+/// The stored container, each value as [RawJson]. Sent with `Isolate.exit`
+/// by a short-lived helper isolate, so the UI isolate receives it without
+/// copying it.
 class LoadedData {
   LoadedData(this.data);
   final Map<String, dynamic> data;
 }
 
 class _DecodeJob {
-  _DecodeJob(this.replyTo, this.text);
+  _DecodeJob(this.replyTo, this.document);
   final SendPort replyTo;
-  final String text;
+
+  /// The document's JSON text, or its gzip-compressed UTF-8 bytes (several
+  /// times smaller to send than the text).
+  final Object document;
 }
 
-void _decodeForUi(_DecodeJob job) =>
-    Isolate.exit(job.replyTo, LoadedData(json.decode(job.text) as Map<String, dynamic>));
+void _splitForUi(_DecodeJob job) {
+  final doc = job.document;
+  final text = doc is String ? doc : utf8.decode(gzip.decode(doc as List<int>));
+  Isolate.exit(job.replyTo, LoadedData({
+    for (final e in splitDocument(text).entries) e.key: RawJson(e.value),
+  }));
+}
 
 class FlushRequest {
   FlushRequest(this.id, this.reset, this.changes);
@@ -120,20 +137,20 @@ Future<void> storageWorkerMain(WorkerInit init) async {
   final port = ReceivePort();
   final worker = _Worker(init);
   final warnings = <String>[];
-  String? text;
+  Object? document;
   try {
-    text = await worker.load(warnings);
+    document = await worker.load(warnings);
   } catch (e) {
     warnings.add('Could not load ${init.mainPath}: $e');
-    text = '{}';
+    document = '{}';
   }
-  init.replyTo.send(WorkerReady(port.sendPort, text != null, warnings));
-  if (text != null) {
-    // The worker itself only keeps each key's JSON text; a helper decodes
-    // the document and hands the objects to the UI isolate.
-    await Isolate.spawn(_decodeForUi, _DecodeJob(init.replyTo, text),
+  init.replyTo.send(WorkerReady(port.sendPort, document != null, warnings));
+  if (document != null) {
+    // The worker itself only keeps each key's JSON text; a helper cuts the
+    // document into the same texts for the UI isolate.
+    await Isolate.spawn(_splitForUi, _DecodeJob(init.replyTo, document),
         onError: init.replyTo, debugName: 'OrcaSecureStorage:decode');
-    text = null;
+    document = null;
   }
   // Fold a replayed log into a new snapshot after replying, so opening the
   // container does not wait for it. Requests run after it (serialised).
@@ -165,7 +182,7 @@ class _Worker {
           // Level 1: ~7x smaller for typical JSON at a fraction of the cost
           // of higher levels.
           compress: GZipCodec(level: 1).encoder,
-          decompress: gzip.decode,
+          decompress: gzip.decoder,
         );
   final WorkerInit init;
   final StorageCodec _codec;
@@ -192,9 +209,10 @@ class _Worker {
 
   // ---- Loading ------------------------------------------------------------
 
-  /// Reads the container into the per-key cache and returns its JSON text
-  /// for the UI isolate, or null when there is no file yet.
-  Future<String?> load(List<String> warnings) async {
+  /// Reads the container into the per-key cache and returns the document
+  /// for the UI isolate (its JSON text, or the snapshot's compressed bytes
+  /// when nothing changed it), or null when there is no file yet.
+  Future<Object?> load(List<String> warnings) async {
     final main = File(init.mainPath);
     final backup = File(init.backupPath);
     final hasMain = _hasData(main);
@@ -222,7 +240,7 @@ class _Worker {
         } else {
           await _resetLog(snapshot.fingerprint, snapshot.length);
         }
-        return replay ? assembleDocument(_cache) : snapshot.text;
+        return replay ? assembleDocument(_cache) : (snapshot.compressed ?? snapshot.text);
       } catch (e) {
         warnings.add('Corrupted box, recovering backup file ($e)');
       }
@@ -290,7 +308,7 @@ class _Worker {
       values = splitDocument(text);
     }
     return _Snapshot(text, values, doc.needsRewrite, await StorageCodec.fingerprintOf(bytes),
-        bytes.length);
+        bytes.length, doc.compressed);
   }
 
   /// Applies the log's changes to [snapshot].data. Returns whether the files
@@ -528,7 +546,11 @@ class _Worker {
 }
 
 class _Snapshot {
-  _Snapshot(this.text, this.values, this.needsRewrite, this.fingerprint, this.length);
+  _Snapshot(this.text, this.values, this.needsRewrite, this.fingerprint, this.length,
+      [this.compressed]);
+
+  /// [text] compressed, when the file was ([DecodedDocument.compressed]).
+  final List<int>? compressed;
 
   /// The document as stored, and each top-level key's JSON text.
   final String text;

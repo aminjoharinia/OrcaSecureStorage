@@ -304,8 +304,13 @@ class OrcaSecureStorage {
 
   GetQueue queue = GetQueue();
 
-  /// listenable of container
-  ValueStorage<Map<String, dynamic>> get listenable => _concrete.subject;
+  /// listenable of container. Decodes every value not read yet first (on
+  /// files, values are decoded when first read), since the map is handed
+  /// out as it is.
+  ValueStorage<Map<String, dynamic>> get listenable {
+    _concrete.decodeAll();
+    return _concrete.subject;
+  }
 
   /// Start the storage drive. Important: use await before calling this api, or side effects will happen.
   late Future<bool> initStorage;

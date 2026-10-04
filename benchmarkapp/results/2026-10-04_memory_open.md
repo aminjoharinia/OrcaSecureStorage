@@ -24,3 +24,10 @@ UI isolate and then re-encoded each value into its cache. 2.1.8 cuts the
 file into each key's JSON text without decoding it; a helper isolate
 decodes the document once and moves the objects to the UI isolate with
 `Isolate.exit`, without a copy.
+
+**Correction:** the UI stall figures here are too low for storages that
+block the UI until the end of a phase: a stall was only counted once the
+next tick ran, and the run ended first. Hive's open blocks the UI for the
+whole open (about 100 ms at 10,000 records, about 870 ms at 100,000); see
+[2026-10-04_decode_on_read.md](2026-10-04_decode_on_read.md), measured with
+the corrected meter.

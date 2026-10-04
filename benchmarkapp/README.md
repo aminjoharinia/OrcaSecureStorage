@@ -126,7 +126,12 @@ flutter build macos --release -t lib/memory_main.dart
 MEM_STORAGE='Hive CE' MEM_PHASE=clear build/macos/Build/Products/Release/storage_benchmark.app/Contents/MacOS/storage_benchmark
 ```
 
-Then `MEM_PHASE=write`, then `MEM_PHASE=open`. `MEM_STORAGE` is a storage's
+Then `MEM_PHASE=write`, then `MEM_PHASE=open`. Besides held and peak memory,
+the `MEMORY` line has the memory right after opening (`afterOpenMB`), the
+time of opening alone (`openMs`), the first read (`firstReadUs`), and with
+`MEM_STALL=1` the longest UI stall while opening and during the rest
+(`openStallMs`, `restStallMs`; a stall still going on at the end of a part
+counts too). `MEM_STORAGE` is a storage's
 full name as in the results tables. Saved runs are in [`results/`](results).
 
 ## Platform notes

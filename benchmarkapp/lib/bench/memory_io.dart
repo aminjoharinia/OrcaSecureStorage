@@ -115,6 +115,13 @@ Future<void> runMemoryChild() async {
 
   final sampler = Timer.periodic(const Duration(milliseconds: 10), (_) => sample());
   var lastTick = 0, maxStall = 0;
+  // A stall still going on has no tick after it yet: count it at each
+  // checkpoint too, or a phase that blocks until its end shows no stall.
+  int stallSoFar() {
+    final pending = sw.elapsedMilliseconds - lastTick;
+    return pending > maxStall ? pending : maxStall;
+  }
+
   final ticker = env['MEM_STALL'] == '1'
       ? Timer.periodic(const Duration(milliseconds: 1), (_) {
           final now = sw.elapsedMilliseconds;
@@ -124,7 +131,16 @@ Future<void> runMemoryChild() async {
       : null;
 
   await adapter.open();
+  // Opening and the work after it, separately from the reads or writes.
+  final openStall = ticker == null ? 0 : stallSoFar();
+  final openMs = sw.elapsedMilliseconds;
+  sample();
+  final afterOpenMB = ((ProcessInfo.currentRss - base) / (1024 * 1024)).round();
+  // The reads and writes are measured from here.
+  maxStall = 0;
+  lastTick = sw.elapsedMilliseconds;
   var found = 0;
+  var firstReadUs = 0;
   if (phase == 'write') {
     for (var i = 0; i < count; i++) {
       await adapter.write('r$i', memoryRecord(i));
@@ -133,11 +149,16 @@ Future<void> runMemoryChild() async {
     await adapter.flush();
     found = count;
   } else {
+    final first = Stopwatch()..start();
+    await adapter.read('r${count ~/ 2}');
+    firstReadUs = first.elapsedMicroseconds;
     for (var i = 0; i < count; i++) {
       if (await adapter.read('r$i') != null) found++;
+      if ((i + 1) % 50 == 0) await Future<void>.delayed(Duration.zero);
     }
   }
   final ms = sw.elapsedMilliseconds;
+  final restStall = ticker == null ? 0 : stallSoFar();
   ticker?.cancel();
   sample();
   sampler.cancel();
@@ -154,7 +175,12 @@ Future<void> runMemoryChild() async {
     'found': found,
     'jsonMB': memoryJsonMB(count).toStringAsFixed(1),
     'ms': ms,
-    if (ticker != null) 'maxStallMs': maxStall,
+    if (ticker != null) 'maxStallMs': openStall > restStall ? openStall : restStall,
+    if (ticker != null) 'openStallMs': openStall,
+    if (ticker != null) 'restStallMs': restStall,
+    'openMs': openMs,
+    'afterOpenMB': afterOpenMB,
+    if (phase == 'open') 'firstReadUs': firstReadUs,
     'steadyMB': held,
     'peakMB': peak < held ? held : peak,
   })}');

@@ -65,7 +65,12 @@ class StorageImpl {
       for (final key in keys)
         key: !data.containsKey(key)
             ? null
-            : (full ? null : _encoded[key]) ?? json.encode(data[key]),
+            : (full ? null : _encoded[key]) ??
+                switch (data[key]) {
+                  // Never read, so never changed: its stored text is current.
+                  final RawJson raw => raw.json,
+                  final value => json.encode(value),
+                },
     };
     _fullResync = false;
     _cleared = false;
@@ -87,7 +92,22 @@ class StorageImpl {
   }
 
   T? read<T>(String key) {
-    return subject.value![key] as T?;
+    final data = subject.value!;
+    final value = data[key];
+    if (value is! RawJson) return value as T?;
+    // First read: decode it and keep the result, so later reads return the
+    // same object (changes made to it in place are saved by save()).
+    final decoded = json.decode(value.json);
+    data[key] = decoded;
+    return decoded as T?;
+  }
+
+  /// Decodes every value not read yet, before the whole map is handed out.
+  void decodeAll() {
+    final data = subject.value!;
+    for (final key in data.keys.toList()) {
+      if (data[key] case final RawJson raw) data[key] = json.decode(raw.json);
+    }
   }
 
   T getKeys<T>() {
@@ -95,6 +115,7 @@ class StorageImpl {
   }
 
   T getValues<T>() {
+    decodeAll();
     return subject.value!.values as T;
   }
 

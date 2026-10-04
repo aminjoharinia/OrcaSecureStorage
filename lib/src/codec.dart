@@ -62,9 +62,13 @@ class StorageRejectedException implements Exception {
 /// The plaintext of a decoded file and whether the file should be rewritten
 /// in the current format (it was 1.x, or its encryption differs from config).
 class DecodedDocument {
-  DecodedDocument(this.plaintext, {required this.needsRewrite});
+  DecodedDocument(this.plaintext, {required this.needsRewrite, this.compressed});
   final String plaintext;
   final bool needsRewrite;
+
+  /// The decrypted, still compressed bytes, when the file was compressed:
+  /// several times smaller than [plaintext] to send to another isolate.
+  final List<int>? compressed;
 }
 
 typedef BytesTransform = List<int> Function(List<int> input);
@@ -119,7 +123,7 @@ class StorageCodec {
 
   /// gzip on platforms that have it (`dart:io`); null writes uncompressed.
   final BytesConverter? compress;
-  final BytesTransform? decompress;
+  final BytesConverter? decompress;
 
   Uint8List? _salt;
   int _iterations = 0;
@@ -299,15 +303,23 @@ class StorageCodec {
       if (flags & _flagSnapshotId != 0) r.skip(r.byte());
       payload = r.rest();
     }
+    final needsRewrite = encrypted != config.encrypted || toRawKey;
     if (flags & _flagCompressed != 0) {
       final gunzip = decompress;
       if (gunzip == null) {
         throw StorageRejectedException('compressed file, no decompressor here');
       }
-      payload = gunzip(payload);
+      // Decompressed and decoded in pieces: the uncompressed bytes are never
+      // held in full.
+      late String text;
+      final sink = gunzip.startChunkedConversion(utf8.decoder
+          .startChunkedConversion(StringConversionSink.withCallback((s) => text = s)));
+      sink
+        ..add(payload)
+        ..close();
+      return DecodedDocument(text, needsRewrite: needsRewrite, compressed: payload);
     }
-    return DecodedDocument(utf8.decode(payload),
-        needsRewrite: encrypted != config.encrypted || toRawKey);
+    return DecodedDocument(utf8.decode(payload), needsRewrite: needsRewrite);
   }
 
   // ---- Change log --------------------------------------------------------
