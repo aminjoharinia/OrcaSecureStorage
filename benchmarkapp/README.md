@@ -78,14 +78,16 @@ Linux, Windows and iOS: `flutter run --release -d linux` / `-d windows` /
 `-d <iphone>`.
 
 Headless run (prints a Markdown table and JSON, saves screenshots, exits; not on
-the web; `--dart-define=THEME=light` or `dark` picks the theme):
+the web; `--dart-define=THEME=light` or `dark` picks the theme;
+`--dart-define=STORAGES=sqflite,Hive CE (encrypted)` runs only those storages,
+by full name):
 
 ```bash
 flutter run --release -d macos --dart-define=AUTORUN=true --dart-define=ENTRIES=100 --dart-define=KINDS=integers,json
 ```
 
-If the window is hidden or minimized, the headless run can stall waiting for
-a frame; keep it visible.
+If the window is hidden or minimized (or the display sleeps), the headless run
+skips its screenshots after waiting 3 s for a frame; the results are printed either way.
 
 ## Memory
 
@@ -106,10 +108,11 @@ storage, three fresh processes run one phase each:
 The chart shows the peak memory each storage added; the table also shows
 what it still held two seconds after each phase (memory freed after a peak
 usually stays with the process), the times, and the longest UI stall. A
-phase that takes over 90 s is stopped. Mobile and web cannot start child
+phase that takes over 30 s is stopped. Mobile and web cannot start child
 processes, so the button is disabled there.
 
-Headless (prints a Markdown table, saves a screenshot, exits):
+Headless (prints a Markdown table, saves a screenshot, exits; `MEMORY=after`
+runs the timing benchmark first, then memory):
 
 ```bash
 flutter run --release -d macos --dart-define=AUTORUN=true --dart-define=MEMORY=true --dart-define=ENTRIES=20000
@@ -133,6 +136,22 @@ time of opening alone (`openMs`), the first read (`firstReadUs`), and with
 (`openStallMs`, `restStallMs`; a stall still going on at the end of a part
 counts too). `MEM_STORAGE` is a storage's
 full name as in the results tables. Saved runs are in [`results/`](results).
+
+### Comparing storages fairly
+
+Run each storage in its own process: storages that run out of time
+(GetStorage, get_secure_storage) keep saving in the background and slow
+down whatever is measured after them in the same process. With one build,
+`BENCH_ENTRIES` and `BENCH_STORAGES` (full names, comma-separated) in the
+environment override `ENTRIES` and `STORAGES`:
+
+```bash
+flutter build macos --release --dart-define=AUTORUN=true --dart-define=MEMORY=after --dart-define=KINDS=strings
+```
+
+```bash
+BENCH_ENTRIES=50000 BENCH_STORAGES='Hive CE (encrypted)' build/macos/Build/Products/Release/storage_benchmark.app/Contents/MacOS/storage_benchmark
+```
 
 ## Platform notes
 

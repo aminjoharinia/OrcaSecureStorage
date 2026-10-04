@@ -24,7 +24,7 @@ Future<MemoryResult?> runMemoryPhase(
   String storage,
   String phase,
   int entries, {
-  Duration timeout = const Duration(seconds: 90),
+  Duration timeout = const Duration(seconds: 30),
 }) async {
   final process = await Process.start(Platform.resolvedExecutable, const [], environment: {
     'MEM_STORAGE': storage,

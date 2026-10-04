@@ -8,6 +8,9 @@ String platformName() => Abi.current().toString();
 
 void exitApp(int code) => exit(code);
 
+/// The process environment (the autorun reads overrides from it).
+Map<String, String> environment() => Platform.environment;
+
 /// Writes [bytes] to the system temp folder (inside the sandbox on macOS)
 /// and returns the path.
 Future<String?> saveFile(String name, List<int> bytes) async {

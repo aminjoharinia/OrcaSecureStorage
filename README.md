@@ -28,7 +28,7 @@ dependencies:
   orca_secure_storage:
     git:
       url: https://github.com/aminjoharinia/OrcaSecureStorage.git
-      ref: v2.3.0
+      ref: v2.3.1
 ```
 ### Install it
 
@@ -122,6 +122,127 @@ reaches disk; `durability` has no effect there. Each save encrypts and
 stores the whole container, so a save waits 75 ms for more writes to join
 it: a burst of writes is stored once. `await box.flush()` stores at once, and
 so does hiding the tab (switching away or closing it).
+
+### Comparison with other storages
+Measured on an Apple Silicon Mac, release build, with the
+[benchmark app](benchmarkapp) (macOS, version 2.3.1). Each storage ran in its
+own process. Times include waiting until each storage counts the data as
+saved (see "Durability" above: OrcaSecureStorage fsyncs, most others do
+not). Speed uses strings of about 100 characters; memory uses JSON records
+of about 330 bytes and is the memory the storage added to its process.
+Operations over 20 s (speed) or 30 s (memory) were stopped; "–" means not
+measured because writing the entries did not finish; get_storage was not run
+at 50,000 and 100,000 entries. Single runs, so small numbers vary by a few
+tenths of a millisecond or a few MB.
+
+**Write every entry, until saved (ms)**
+
+| Storage | 50 | 500 | 5,000 | 50,000 | 100,000 |
+|---|---:|---:|---:|---:|---:|
+| OrcaSecureStorage (key) 🔒 | 0.2 | 1.3 | 9.6 | 111 | 250 |
+| Hive CE (encrypted) 🔒 | 1.7 | 16 | 191 | 1.5 s | 3.0 s |
+| SharedPreferences | 5.5 | 55 | 517 | > 20 s | > 20 s |
+| get_secure_storage 1.0.5 🔒 | 35 | 2.5 s | > 20 s | > 20 s | > 20 s |
+| get_storage | 16 | 226 | > 20 s | not run | not run |
+| sqflite | 19 | 167 | 2.1 s | 18.8 s | > 20 s |
+
+**Read every entry (ms)**
+
+| Storage | 50 | 500 | 5,000 | 50,000 | 100,000 |
+|---|---:|---:|---:|---:|---:|
+| OrcaSecureStorage (key) 🔒 | 0 | 0.2 | 2.6 | 24 | 52 |
+| Hive CE (encrypted) 🔒 | 0 | 0.4 | 4.3 | 45 | 97 |
+| SharedPreferences | 0 | 0.3 | 3.5 | – | – |
+| get_secure_storage 1.0.5 🔒 | 0.1 | 0.5 | – | – | – |
+| get_storage | 0 | 0.2 | – | not run | not run |
+| sqflite | 2.3 | 22 | 234 | 2.2 s | – |
+
+**Open from disk and read every entry (ms)**
+
+| Storage | 50 | 500 | 5,000 | 50,000 | 100,000 |
+|---|---:|---:|---:|---:|---:|
+| OrcaSecureStorage (key) 🔒 | 1.4 | 2.6 | 13 | 109 | 235 |
+| Hive CE (encrypted) 🔒 | 0.7 | 2.9 | 17 | 166 | 348 |
+| SharedPreferences | 0.3 | 1.1 | 10 | – | – |
+| get_secure_storage 1.0.5 🔒 | 4.2 | 5.5 | – | – | – |
+| get_storage | 0.6 | 0.9 | – | not run | not run |
+| sqflite | 2.4 | 26 | 239 | 2.2 s | – |
+
+**Delete every entry, until saved (ms)**
+
+| Storage | 50 | 500 | 5,000 | 50,000 | 100,000 |
+|---|---:|---:|---:|---:|---:|
+| OrcaSecureStorage (key) 🔒 | 0.1 | 0.5 | 4.3 | 38 | 75 |
+| Hive CE (encrypted) 🔒 | 1.5 | 14 | 132 | 1.2 s | 2.5 s |
+| SharedPreferences | 5.1 | 51 | 560 | – | – |
+| get_secure_storage 1.0.5 🔒 | 7.5 | 78 | – | – | – |
+| get_storage | 6.1 | 63 | – | not run | not run |
+| sqflite | 14 | 162 | 2.2 s | > 20 s | – |
+
+**Update one entry, until saved (ms)**
+
+| Storage | 50 | 500 | 5,000 | 50,000 | 100,000 |
+|---|---:|---:|---:|---:|---:|
+| OrcaSecureStorage (key) 🔒 | 0.1 | 0.1 | 0.1 | 0.1 | 0.1 |
+| Hive CE (encrypted) 🔒 | 0.1 | 0.1 | 0.1 | 0.1 | 0.1 |
+| SharedPreferences | 0.1 | 0.1 | 0.1 | – | – |
+| get_secure_storage 1.0.5 🔒 | 0.5 | 3.5 | – | – | – |
+| get_storage | 0.2 | 0.4 | – | not run | not run |
+| sqflite | 0.4 | 0.3 | 0.4 | 0.4 | – |
+
+**Memory right after opening (MB)**
+
+| Storage | 50 | 500 | 5,000 | 50,000 | 100,000 |
+|---|---:|---:|---:|---:|---:|
+| OrcaSecureStorage (key) 🔒 | 1 | 3 | 14 | 89 | 191 |
+| Hive CE (encrypted) 🔒 | 1 | 4 | 23 | 168 | 313 |
+| SharedPreferences | 0 | 1 | 9 | stopped | stopped |
+| get_secure_storage 1.0.5 🔒 | 2 | 9 | stopped | stopped | stopped |
+| get_storage | 3 | 2 | stopped | not run | not run |
+| sqflite | 0 | 0 | 0 | 0 | stopped |
+
+**Memory after reading every entry (MB)**
+
+| Storage | 50 | 500 | 5,000 | 50,000 | 100,000 |
+|---|---:|---:|---:|---:|---:|
+| OrcaSecureStorage (key) 🔒 | 2 | 5 | 29 | 174 | 333 |
+| Hive CE (encrypted) 🔒 | 1 | 5 | 33 | 174 | 318 |
+| SharedPreferences | 0 | 3 | 16 | stopped | stopped |
+| get_secure_storage 1.0.5 🔒 | 2 | 9 | stopped | stopped | stopped |
+| get_storage | 3 | 4 | stopped | not run | not run |
+| sqflite | 1 | 4 | 6 | 13 | stopped |
+
+**Peak memory while writing every entry (MB)**
+
+| Storage | 50 | 500 | 5,000 | 50,000 | 100,000 |
+|---|---:|---:|---:|---:|---:|
+| OrcaSecureStorage (key) 🔒 | 2 | 5 | 29 | 157 | 277 |
+| Hive CE (encrypted) 🔒 | 3 | 7 | 15 | 94 | 183 |
+| SharedPreferences | 1 | 4 | 10 | stopped | stopped |
+| get_secure_storage 1.0.5 🔒 | 6 | 30 | stopped | stopped | stopped |
+| get_storage | 6 | 25 | stopped | not run | not run |
+| sqflite | 1 | 4 | 6 | 52 | stopped |
+
+**Longest UI stall while opening (ms)**
+
+| Storage | 50 | 500 | 5,000 | 50,000 | 100,000 |
+|---|---:|---:|---:|---:|---:|
+| OrcaSecureStorage (key) 🔒 | 3 | 2 | 3 | 3 | 4 |
+| Hive CE (encrypted) 🔒 | 3 | 9 | 58 | 446 | 909 |
+| SharedPreferences | 0 | 3 | 11 | stopped | stopped |
+| get_secure_storage 1.0.5 🔒 | 9 | 17 | stopped | stopped | stopped |
+| get_storage | 19 | 4 | stopped | not run | not run |
+| sqflite | 0 | 1 | 1 | 2 | stopped |
+
+In short: OrcaSecureStorage writes 8–20× and deletes 15–33× faster than
+encrypted Hive, and opens without blocking the UI (Hive decodes the whole box
+on the UI isolate: about 0.9 s at 100,000 entries). It uses less memory than
+Hive right after opening and about the same once every entry has been read,
+and more while writing, since it keeps every value's JSON in its background
+isolate. sqflite uses the least memory (it reads from disk on demand) but
+is the slowest to write. SharedPreferences, get_secure_storage and
+get_storage do not finish 50,000 writes within the time limits. Full
+results: [benchmarkapp/results/2026-10-04_comparison.md](benchmarkapp/results/2026-10-04_comparison.md).
 
 ### How it works (and its memory use)
 A container lives in memory twice, on purpose:

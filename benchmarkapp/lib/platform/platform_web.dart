@@ -3,6 +3,9 @@ import 'dart:js_interop';
 
 import 'package:web/web.dart' as web;
 
+/// No process environment on the web.
+Map<String, String> environment() => const {};
+
 String platformName() => const bool.fromEnvironment('dart.tool.dart2wasm')
     ? 'web (wasm)'
     : 'web (js)';

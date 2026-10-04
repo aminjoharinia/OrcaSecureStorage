@@ -24,6 +24,9 @@ import 'ui/theme.dart';
 const _autorun = bool.fromEnvironment('AUTORUN');
 const _autorunEntries = int.fromEnvironment('ENTRIES', defaultValue: 50);
 // e.g. --dart-define=KINDS=integers,json (default: all value types).
+// e.g. --dart-define=STORAGES=sqflite,Hive CE (encrypted): full names
+// (default: all storages).
+const _autorunStorages = String.fromEnvironment('STORAGES');
 const _autorunKinds = String.fromEnvironment('KINDS');
 // --dart-define=MEMORY=true: the autorun measures memory instead (desktop);
 // MEMORY=after: the timing benchmark first, then memory, as from the UI.
@@ -129,11 +132,20 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
   void initState() {
     super.initState();
     if (_autorun) {
-      final i = _entryOptions.indexOf(_autorunEntries);
+      // BENCH_ENTRIES / BENCH_STORAGES in the environment override the
+      // dart-defines, so one build can run each storage in its own process.
+      final env = environment();
+      final entries = int.tryParse(env['BENCH_ENTRIES'] ?? '') ?? _autorunEntries;
+      final storages = env['BENCH_STORAGES'] ?? _autorunStorages;
+      final i = _entryOptions.indexOf(entries);
       if (i >= 0) _entriesIndex = i;
       if (_autorunKinds.isNotEmpty) {
         final names = _autorunKinds.split(',').map((k) => k.trim()).toSet();
         _kinds.retainWhere((k) => names.contains(k.name));
+      }
+      if (storages.isNotEmpty) {
+        final names = storages.split(',').map((s) => s.trim()).toSet();
+        _selected.retainWhere((a) => names.contains(a.name));
       }
       WidgetsBinding.instance.addPostFrameCallback((_) => _autorunAndExit());
     }
@@ -202,7 +214,7 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
           if (phase == 'write') row.write = r;
           if (phase == 'open') row.open = r;
         } on TimeoutException {
-          row.problem = '$phase took over 90 s (stopped)';
+          row.problem = '$phase took over 30 s (stopped)';
         } catch (e) {
           row.problem = '$phase failed: $e';
         }
@@ -222,10 +234,12 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
   static const _memoryHeaders = [
     'Write held MB',
     'Write peak MB',
-    'Open held MB',
+    'After open MB',
+    'After reading all MB',
     'Open peak MB',
     'Write ms',
     'Open + read ms',
+    'Open UI stall ms',
     'Max UI stall ms',
   ];
 
@@ -238,10 +252,12 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
     return [
       c(w?.steadyMB),
       c(w?.peakMB),
+      c(o?.afterOpenMB),
       c(o?.steadyMB),
       c(o?.peakMB),
       c(w?.ms),
       c(o?.ms),
+      c(o?.openStallMs),
       c(stall.isEmpty ? null : stall.reduce((a, b) => a > b ? a : b)),
     ];
   }
@@ -321,10 +337,9 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
     }
     if (_autorunMemory.isNotEmpty) {
       await _runMemory();
-      await WidgetsBinding.instance.endOfFrame;
-      await _saveScreenshot('storage_benchmark_memory.png');
       // ignore: avoid_print
       print('BENCHMARK_MEMORY_BEGIN\n${_memoryMarkdown()}BENCHMARK_MEMORY_END');
+      await _screenshotIfDrawn('storage_benchmark_memory.png');
       exitApp(0);
       return;
     }
@@ -333,8 +348,7 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
       setState(() => _op = op);
       // Let the bars finish growing.
       await Future<void>.delayed(const Duration(milliseconds: 700));
-      await WidgetsBinding.instance.endOfFrame;
-      await _saveScreenshot('storage_benchmark_${op.name}.png');
+      await _screenshotIfDrawn('storage_benchmark_${op.name}.png');
     }
     // ignore: avoid_print
     print('BENCHMARK_MARKDOWN_BEGIN\n${_markdown()}BENCHMARK_MARKDOWN_END');
@@ -351,6 +365,19 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
       ])}',
     );
     exitApp(0);
+  }
+
+  /// A hidden or covered window (or a sleeping display) draws no frames, so
+  /// waiting for one could hang a headless run: skip the screenshot then.
+  Future<void> _screenshotIfDrawn(String name) async {
+    try {
+      await WidgetsBinding.instance.endOfFrame.timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      // ignore: avoid_print
+      print('SCREENSHOT skipped: no frame drawn (window hidden?)');
+      return;
+    }
+    await _saveScreenshot(name);
   }
 
   Future<void> _saveScreenshot(String name) async {

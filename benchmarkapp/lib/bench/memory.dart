@@ -28,6 +28,8 @@ class MemoryResult {
     required this.steadyMB,
     required this.peakMB,
     this.maxStallMs,
+    this.afterOpenMB,
+    this.openStallMs,
   });
 
   factory MemoryResult.fromJson(Map<String, dynamic> j) => MemoryResult(
@@ -35,6 +37,8 @@ class MemoryResult {
     steadyMB: (j['steadyMB'] as num).toDouble(),
     peakMB: (j['peakMB'] as num).toDouble(),
     maxStallMs: (j['maxStallMs'] as num?)?.toDouble(),
+    afterOpenMB: (j['afterOpenMB'] as num?)?.toDouble(),
+    openStallMs: (j['openStallMs'] as num?)?.toDouble(),
   );
 
   /// Time of the phase (open + read everything, or write everything).
@@ -48,6 +52,12 @@ class MemoryResult {
 
   /// Longest time the UI isolate's event loop was blocked.
   final double? maxStallMs;
+
+  /// Memory added right after opening, before reading or writing anything.
+  final double? afterOpenMB;
+
+  /// Longest UI stall while opening alone.
+  final double? openStallMs;
 }
 
 /// Write and open results of one storage, or why there are none.

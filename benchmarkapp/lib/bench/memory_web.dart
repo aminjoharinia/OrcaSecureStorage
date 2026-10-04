@@ -9,7 +9,7 @@ Future<MemoryResult?> runMemoryPhase(
   String storage,
   String phase,
   int entries, {
-  Duration timeout = const Duration(seconds: 90),
+  Duration timeout = const Duration(seconds: 30),
 }) => throw UnsupportedError('memory benchmark: desktop only');
 
 Future<void> runMemoryChild() =>

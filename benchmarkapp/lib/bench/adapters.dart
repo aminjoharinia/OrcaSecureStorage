@@ -65,7 +65,7 @@ class OrcaAdapter extends StorageAdapter {
     OrcaMode.none => 'Orca',
   };
   @override
-  String get package => 'orca_secure_storage 2.3.0';
+  String get package => 'orca_secure_storage 2.3.1';
   @override
   String get encryption => switch (mode) {
     OrcaMode.password => 'AES-256-GCM, PBKDF2 key',
