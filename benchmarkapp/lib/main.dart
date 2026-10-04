@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui;
 
@@ -8,10 +9,13 @@ import 'package:flutter/services.dart';
 
 import 'bench/adapter.dart';
 import 'bench/adapters.dart';
+import 'bench/memory.dart';
+import 'bench/memory_web.dart' if (dart.library.io) 'bench/memory_io.dart';
 import 'bench/runner.dart';
 import 'platform/platform_web.dart'
     if (dart.library.io) 'platform/platform_io.dart';
 import 'ui/bar_chart.dart';
+import 'ui/memory_chart.dart';
 import 'ui/results_table.dart';
 import 'ui/theme.dart';
 
@@ -21,10 +25,18 @@ const _autorun = bool.fromEnvironment('AUTORUN');
 const _autorunEntries = int.fromEnvironment('ENTRIES', defaultValue: 50);
 // e.g. --dart-define=KINDS=integers,json (default: all value types).
 const _autorunKinds = String.fromEnvironment('KINDS');
+// --dart-define=MEMORY=true: the autorun measures memory instead (desktop);
+// MEMORY=after: the timing benchmark first, then memory, as from the UI.
+const _autorunMemory = String.fromEnvironment('MEMORY');
 // light, dark or system (default).
 const _theme = String.fromEnvironment('THEME', defaultValue: 'system');
 
 void main() {
+  // Started by the memory benchmark to measure one storage: no UI.
+  if (isMemoryChild) {
+    runMemoryChild();
+    return;
+  }
   WidgetsFlutterBinding.ensureInitialized();
   themeMode.value = ThemeMode.values.firstWhere(
     (m) => m.name == _theme,
@@ -70,7 +82,7 @@ class BenchmarkPage extends StatefulWidget {
 }
 
 class _BenchmarkPageState extends State<BenchmarkPage> {
-  static const _entryOptions = [10, 50, 100, 500, 1000, 5000, 10000];
+  static const _entryOptions = [10, 50, 100, 500, 1000, 5000, 10000, 15000, 20000];
 
   final _adapters = allAdapters();
   late final Set<StorageAdapter> _selected = {..._adapters};
@@ -91,6 +103,10 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
 
   /// Entries of the last run (the chips may have changed since).
   int _resultEntries = 0;
+
+  /// Last memory run, and its entries.
+  List<(StorageAdapter, MemoryRow)>? _memory;
+  int _memoryEntries = 0;
 
   int get _entries => _entryOptions[_entriesIndex];
   List<Kind> get _legendKinds => _results != null
@@ -157,6 +173,97 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
     debugPrint(_markdown(), wrapWidth: 100000);
   }
 
+  /// Measures each selected storage in child processes of this app: clear,
+  /// then write, then open, each in a fresh process.
+  Future<void> _runMemory() async {
+    final adapters = [
+      for (final a in _adapters)
+        if (_selected.contains(a)) a,
+    ];
+    final entries = _entries;
+    final rows = [for (final a in adapters) (a, MemoryRow())];
+    _progress.value = ('Starting', 0);
+    setState(() {
+      _running = true;
+      _memory = rows;
+      _memoryEntries = entries;
+    });
+    const phases = ['clear', 'write', 'open'];
+    for (final (i, (a, row)) in rows.indexed) {
+      for (final (j, phase) in phases.indexed) {
+        _progress.value = (
+          '${a.name}: $phase ${_short(entries)} records',
+          (i * phases.length + j) / (rows.length * phases.length),
+        );
+        try {
+          final r = await runMemoryPhase(a.name, phase, entries);
+          if (phase == 'write') row.write = r;
+          if (phase == 'open') row.open = r;
+        } on TimeoutException {
+          row.problem = '$phase took over 90 s (stopped)';
+        } catch (e) {
+          row.problem = '$phase failed: $e';
+        }
+        if (!mounted) return;
+        setState(() {});
+        if (row.problem != null) break;
+      }
+    }
+    _progress.value = ('Done', 1);
+    if (!mounted) return;
+    setState(() => _running = false);
+    debugPrint(_memoryMarkdown(), wrapWidth: 100000);
+  }
+
+  static String _short(int n) => n >= 1000 ? '${n ~/ 1000}k' : '$n';
+
+  static const _memoryHeaders = [
+    'Write held MB',
+    'Write peak MB',
+    'Open held MB',
+    'Open peak MB',
+    'Write ms',
+    'Open + read ms',
+    'Max UI stall ms',
+  ];
+
+  List<ResultCell> _memoryCells(MemoryRow row) {
+    ResultCell c(double? v) => v == null
+        ? const ResultCell('–')
+        : ResultCell(formatNum(v), value: v);
+    final w = row.write, o = row.open;
+    final stall = [?w?.maxStallMs, ?o?.maxStallMs];
+    return [
+      c(w?.steadyMB),
+      c(w?.peakMB),
+      c(o?.steadyMB),
+      c(o?.peakMB),
+      c(w?.ms),
+      c(o?.ms),
+      c(stall.isEmpty ? null : stall.reduce((a, b) => a > b ? a : b)),
+    ];
+  }
+
+  String _memoryMarkdown() {
+    final rows = _memory;
+    if (rows == null) return '';
+    final b = StringBuffer()
+      ..writeln(
+        'Memory — ${platformName()}, $_buildMode, $_memoryEntries records '
+        '(${memoryJsonMB(_memoryEntries).toStringAsFixed(1)} MB of JSON)',
+      )
+      ..writeln()
+      ..writeln('| Storage | Encryption | ${_memoryHeaders.join(' | ')} |')
+      ..writeln('|---|---|${'---:|' * _memoryHeaders.length}');
+    for (final (a, row) in rows) {
+      final cells = row.problem != null
+          ? [row.problem!, ...List.filled(_memoryHeaders.length - 1, '')]
+          : [for (final c in _memoryCells(row)) c.text];
+      b.writeln('| ${a.name} | ${a.encryption} | ${cells.join(' | ')} |');
+    }
+    return b.toString();
+  }
+
   String _markdown() {
     final results = _results ?? [];
     String cell(AdapterResult r, Op op, Kind k) =>
@@ -205,6 +312,20 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
   }
 
   Future<void> _autorunAndExit() async {
+    if (_autorunMemory == 'after') {
+      await _run();
+      // ignore: avoid_print
+      print('BENCHMARK_MARKDOWN_BEGIN\n${_markdown()}BENCHMARK_MARKDOWN_END');
+    }
+    if (_autorunMemory.isNotEmpty) {
+      await _runMemory();
+      await WidgetsBinding.instance.endOfFrame;
+      await _saveScreenshot('storage_benchmark_memory.png');
+      // ignore: avoid_print
+      print('BENCHMARK_MEMORY_BEGIN\n${_memoryMarkdown()}BENCHMARK_MEMORY_END');
+      exitApp(0);
+      return;
+    }
     await _run();
     for (final op in Op.values) {
       setState(() => _op = op);
@@ -242,7 +363,14 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
   }
 
   Future<void> _copyResults() async {
-    await Clipboard.setData(ClipboardData(text: _markdown()));
+    await Clipboard.setData(
+      ClipboardData(
+        text: [
+          if (_results != null) _markdown(),
+          if (_memory != null) _memoryMarkdown(),
+        ].join('\n'),
+      ),
+    );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -522,6 +650,20 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
               _running ? 'Running…' : 'Run benchmark · ${short(_entries)}',
             ),
           ),
+          const SizedBox(height: 10),
+          Tooltip(
+            message: memorySupported
+                ? 'Each storage is written and opened in its own background '
+                      'process with ${short(_entries)} JSON records of ~330 bytes'
+                : 'Needs a desktop OS: each storage runs in its own process',
+            child: FilledButton.tonalIcon(
+              onPressed: memorySupported && !_running && _selected.isNotEmpty
+                  ? _runMemory
+                  : null,
+              icon: const Icon(Icons.memory_rounded, size: 18),
+              label: Text('Measure memory · ${short(_entries)}'),
+            ),
+          ),
           AnimatedSize(
             duration: const Duration(milliseconds: 250),
             curve: Curves.easeOutCubic,
@@ -530,7 +672,9 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed: _results == null || _running ? null : _copyResults,
+            onPressed: (_results == null && _memory == null) || _running
+                ? null
+                : _copyResults,
             icon: const Icon(Icons.content_copy_rounded, size: 16),
             label: const Text('Copy results as Markdown'),
           ),
@@ -590,7 +734,68 @@ class _BenchmarkPageState extends State<BenchmarkPage> {
       color: scheme.onSurfaceVariant,
     );
     final results = _results;
+    final memory = _memory;
     return [
+      if (memory != null) ...[
+        Panel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Memory · $_memoryEntries records · '
+                '${memoryJsonMB(_memoryEntries).toStringAsFixed(1)} MB of JSON',
+                style: theme.textTheme.titleMedium,
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Peak memory each storage added to its own process · lower is better',
+                style: muted,
+              ),
+              const SizedBox(height: 16),
+              MemoryChart(rows: memory),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 18,
+                children: [
+                  for (final (color, text) in [
+                    (memoryWriteColor, 'writing every record'),
+                    (memoryOpenColor, 'opening and reading every record'),
+                  ])
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _Dot(color),
+                        const SizedBox(width: 6),
+                        Text(text, style: muted),
+                      ],
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              ResultsTable(
+                headers: _memoryHeaders,
+                results: [
+                  for (final (a, row) in memory)
+                    AdapterResult(a)..error = row.problem,
+                ],
+                cells: (r) => _memoryCells(
+                  memory.firstWhere((m) => m.$1 == r.adapter).$2,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Each storage is cleared, written and opened in fresh '
+                'processes of this app. Held: two seconds after the phase; '
+                'memory freed after a peak usually stays with the process. '
+                'Below about 10k records the differences are within a few MB '
+                'of noise. Lowest in each column highlighted.',
+                style: muted.copyWith(height: 1.5),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
       Panel(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

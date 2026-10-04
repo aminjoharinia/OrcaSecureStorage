@@ -2,12 +2,13 @@
 
 A Flutter app that compares key-value storages in a real app, on every
 platform, in the style of the get_storage benchmark: **read / write / delete**
-tabs, integers vs strings, 10–1000 entries.
+tabs, integers vs strings, 10–20,000 entries, and memory.
 
 | Label | Storage | Encryption |
 |---|---|---|
 | Orca pw 🔒 | OrcaSecureStorage (this repo) with a password | AES-256-GCM, key from PBKDF2 (600,000 iterations) |
 | Orca key 🔒 | OrcaSecureStorage with `encryptionKey` | AES-256-GCM, raw 32-byte key |
+| Orca os 🔒 | The same with `durability: Durability.os` (change-log appends not fsynced) | AES-256-GCM, raw 32-byte key |
 | Orca | OrcaSecureStorage, no password | none |
 | GSS 🔒 | get_secure_storage 1.0.5 (gslender) | AES-128-CTR + HMAC |
 | GS | get_storage 2.1.1 | none |
@@ -51,7 +52,7 @@ dark themes (follows the system by default; switch in the header).
 Calls are awaited one by one, the way app code usually uses these APIs (no
 batching); every 50 operations the loop gives the event loop a turn, as a real
 app would between user actions. Operations over 20 s are stopped and shown as
-"timeout". Entries: 10 to 10,000.
+"timeout". Entries: 10 to 20,000.
 
 "Saved" means what each API promises: Orca fsyncs its files; Hive, Sembast and
 GetStorage write without fsync; SharedPreferences on Apple platforms returns
@@ -88,22 +89,34 @@ a frame; keep it visible.
 
 ## Memory
 
-[`lib/memory_main.dart`](lib/memory_main.dart) measures memory, one storage
-and one phase per process so each process's memory belongs to that storage
-alone (not on the web; its window stays blank):
+**Measure memory** (desktop only) runs each selected storage in its own
+process, so each process's memory belongs to that storage alone: the app
+starts itself as a child process. On macOS the child runs in the
+background: no Dock icon, no focus, and its window stays transparent and
+off-screen (the window has to exist, since that starts the Flutter engine).
+On Linux and Windows a blank window may still open briefly. For each
+storage, three fresh processes run one phase each:
 
-- **clear**: empties the store. Run it first, in its own process: emptying
-  a store loads what is in it, which would otherwise count towards `write`.
-- **write**: opens the empty store, writes `MEM_MB` (default 15) MB of JSON
-  records (~330 bytes each) one by one, waits until saved.
-- **open**: opens that data in a new process, as on an app start, and reads
-  every record.
+- **clear**: empties the store (emptying a store loads what is in it,
+  which would otherwise count towards `write`).
+- **write**: writes the selected number of JSON records (~330 bytes each,
+  whatever value types are selected) one by one and waits until saved.
+- **open**: opens that data, as on an app start, and reads every record.
 
-It prints the resident memory the storage added: held two seconds after the
-phase (`steadyMB`) and at its highest (`peakMB`). Memory freed after a peak
-usually stays with the process, so the two are often close. With
-`MEM_STALL=1` it also prints the longest UI stall during the phase
-(`maxStallMs`).
+The chart shows the peak memory each storage added; the table also shows
+what it still held two seconds after each phase (memory freed after a peak
+usually stays with the process), the times, and the longest UI stall. A
+phase that takes over 90 s is stopped. Mobile and web cannot start child
+processes, so the button is disabled there.
+
+Headless (prints a Markdown table, saves a screenshot, exits):
+
+```bash
+flutter run --release -d macos --dart-define=AUTORUN=true --dart-define=MEMORY=true --dart-define=ENTRIES=20000
+```
+
+From the command line, one phase at a time, sized by entries or MB of JSON
+(`MEM_ENTRIES`, or `MEM_MB`, default 15; `MEM_STALL=1` adds the UI stall):
 
 ```bash
 flutter build macos --release -t lib/memory_main.dart
@@ -113,8 +126,8 @@ flutter build macos --release -t lib/memory_main.dart
 MEM_STORAGE='Hive CE' MEM_PHASE=clear build/macos/Build/Products/Release/storage_benchmark.app/Contents/MacOS/storage_benchmark
 ```
 
-`MEM_STORAGE` is a storage's full name as in the results tables. Saved runs
-are in [`results/`](results).
+Then `MEM_PHASE=write`, then `MEM_PHASE=open`. `MEM_STORAGE` is a storage's
+full name as in the results tables. Saved runs are in [`results/`](results).
 
 ## Platform notes
 

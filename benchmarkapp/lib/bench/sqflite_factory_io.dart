@@ -5,6 +5,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' as sqflite;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart' as ffi;
 
+import 'adapter.dart' show benchFileName;
+
 const String? sqfliteUnsupportedReason = null;
 
 class BenchDatabase {
@@ -38,7 +40,7 @@ Future<BenchDatabase> openBenchDatabase() async {
     dir = await sqflite.getDatabasesPath();
   }
   final db = await factory.openDatabase(
-    p.join(dir, 'storage_benchmark.db'),
+    p.join(dir, benchFileName('storage_benchmark.db')),
     options: sqflite.OpenDatabaseOptions(
       version: 1,
       onCreate: (db, _) =>

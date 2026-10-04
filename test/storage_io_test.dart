@@ -94,16 +94,23 @@ void main() {
     expect(r.read('k7'), isNull);
     expect(r.read('k99'), {'i': 99, 'name': 'entry 99'});
 
-    await box.erase();
+    // Erase and write in one turn: they are saved together as one snapshot,
+    // with no log. (A log would start the idle compaction, which rewrites
+    // .oss and .ossbak while the checks below run, and the reopened copy
+    // would fold it into a new snapshot through .tmp files in the
+    // background.)
+    box.erase().ignore();
     box.write('after', 1);
     await flushed(box);
+    expect(file('inc.osslog').lengthSync(), StorageCodec.logHeaderLength);
     r = await reopen('inc', 'inc_r2');
     expect(r.getKeys<Iterable>().toList(), ['after']);
 
     expect(isV2('inc.oss'), isTrue);
     expect(containsText('inc.oss', 'entry'), isFalse);
     expect(bytes('inc.ossbak'), bytes('inc.oss'));
-    expect(dir.listSync().where((f) => f.path.endsWith('.tmp')), isEmpty);
+    expect(dir.listSync().where((f) => f.path.contains('/inc.') && f.path.endsWith('.tmp')),
+        isEmpty);
   });
 
   test('save() persists values mutated in place', () async {
@@ -354,6 +361,26 @@ void main() {
     await flushed(box);
     expect(isV2('nopw.oss'), isTrue);
     expect((await reopen('nopw', 'nopw_r', password: null)).read('x'), [1, 'two']);
+  });
+
+  test('Durability.os appends to the log and reopens the same data', () async {
+    await OrcaSecureStorage.init(container: 'dur', password: _password, durability: Durability.os);
+    final box = OrcaSecureStorage(container: 'dur');
+    box.write('first', 1);
+    await box.flush();
+    final logBefore = file('dur.osslog').lengthSync();
+    box.write('second', {'n': 2});
+    await box.flush();
+    // Saved as a log record (not fsynced), not by rewriting the snapshot.
+    expect(file('dur.osslog').lengthSync(), greaterThan(logBefore));
+    final copy = await reopen('dur', 'dur_r');
+    expect(copy.read('first'), 1);
+    expect(copy.read('second'), {'n': 2});
+
+    expect(() => OrcaSecureStorage(container: 'dur', durability: Durability.fsync),
+        throwsStateError);
+    expect(OrcaSecureStorage(container: 'dur', durability: Durability.os), same(box));
+    expect(OrcaSecureStorage(container: 'dur'), same(box));
   });
 
   test('a save too large for the log is written as a snapshot', () async {

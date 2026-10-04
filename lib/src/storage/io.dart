@@ -98,8 +98,11 @@ class StorageImpl {
     return subject.value!.values as T;
   }
 
-  Future<void> init(
-      Map<String, dynamic>? initialData, StorageCodecConfig config) async {
+  /// Saves are not delayed here; see the web version.
+  void saveNow() {}
+
+  Future<void> init(Map<String, dynamic>? initialData, StorageCodecConfig config,
+      Durability durability) async {
     subject.value = initialData ?? <String, dynamic>{};
     final dir = await _dir();
     final main = _file(dir, '.oss');
@@ -140,7 +143,8 @@ class StorageImpl {
     await Isolate.spawn(
       storageWorkerMain,
       WorkerInit(_replies!.sendPort, main.path, backup.path, log.path,
-          [for (final f in _legacyFiles(dir)) f.path], config),
+          [for (final f in _legacyFiles(dir)) f.path], config,
+          fsyncLog: durability == Durability.fsync),
       onError: _replies!.sendPort,
       debugName: 'OrcaSecureStorage:$fileName',
     );

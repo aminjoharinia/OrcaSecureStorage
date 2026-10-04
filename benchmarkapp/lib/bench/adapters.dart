@@ -5,7 +5,7 @@ import 'package:get_secure_storage/get_secure_storage.dart'
 import 'package:get_storage/get_storage.dart' show GetStorage;
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:orca_secure_storage/orca_secure_storage.dart'
-    show OrcaSecureStorage;
+    show Durability, OrcaSecureStorage;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../platform/platform_web.dart'
@@ -23,6 +23,7 @@ final _orcaKey = List<int>.generate(32, (i) => (i * 53 + 7) & 0xff);
 List<StorageAdapter> allAdapters() => [
   OrcaAdapter(OrcaMode.password),
   OrcaAdapter(OrcaMode.key),
+  OrcaAdapter(OrcaMode.key, durability: Durability.os),
   OrcaAdapter(OrcaMode.none),
   GetSecureStorageAdapter(),
   GetStorageAdapter(),
@@ -37,29 +38,34 @@ List<StorageAdapter> allAdapters() => [
 enum OrcaMode { password, key, none }
 
 class OrcaAdapter extends StorageAdapter {
-  OrcaAdapter(this.mode);
+  OrcaAdapter(this.mode, {this.durability = Durability.fsync});
   final OrcaMode mode;
+
+  /// [Durability.os] skips the fsync of change-log appends.
+  final Durability durability;
   late OrcaSecureStorage _box;
 
+  bool get _os => durability == Durability.os;
+
   String get _container => switch (mode) {
-    OrcaMode.password => 'bench_orca_enc',
-    OrcaMode.key => 'bench_orca_key',
-    OrcaMode.none => 'bench_orca',
-  };
+    OrcaMode.password => '${storagePrefix}_orca_enc',
+    OrcaMode.key => '${storagePrefix}_orca_key',
+    OrcaMode.none => '${storagePrefix}_orca',
+  } + (_os ? '_os' : '');
   @override
   String get name => switch (mode) {
     OrcaMode.password => 'OrcaSecureStorage (password)',
-    OrcaMode.key => 'OrcaSecureStorage (key)',
+    OrcaMode.key => _os ? 'OrcaSecureStorage (key, no fsync)' : 'OrcaSecureStorage (key)',
     OrcaMode.none => 'OrcaSecureStorage (no password)',
   };
   @override
   String get label => switch (mode) {
     OrcaMode.password => 'Orca pw',
-    OrcaMode.key => 'Orca key',
+    OrcaMode.key => _os ? 'Orca os' : 'Orca key',
     OrcaMode.none => 'Orca',
   };
   @override
-  String get package => 'orca_secure_storage 2.1.8';
+  String get package => 'orca_secure_storage 2.2.0';
   @override
   String get encryption => switch (mode) {
     OrcaMode.password => 'AES-256-GCM, PBKDF2 key',
@@ -71,6 +77,7 @@ class OrcaAdapter extends StorageAdapter {
     container: container,
     password: mode == OrcaMode.password ? _password : null,
     encryptionKey: mode == OrcaMode.key ? _orcaKey : null,
+    durability: durability,
   );
 
   @override
@@ -138,8 +145,8 @@ class GetSecureStorageAdapter extends StorageAdapter {
 
   @override
   Future<void> open() async {
-    await GetSecureStorage.init(container: 'bench_gss', password: _password);
-    _box = GetSecureStorage(container: 'bench_gss');
+    await GetSecureStorage.init(container: '${storagePrefix}_gss', password: _password);
+    _box = GetSecureStorage(container: '${storagePrefix}_gss');
   }
 
   int _coldCount = 0;
@@ -148,8 +155,8 @@ class GetSecureStorageAdapter extends StorageAdapter {
 
   @override
   Future<void> openCold() async {
-    final name = _coldName = 'bench_gss_cold${_coldCount++}';
-    await copyStore('bench_gss', name, '.gs');
+    final name = _coldName = '${storagePrefix}_gss_cold${_coldCount++}';
+    await copyStore('${storagePrefix}_gss', name, '.gs');
     await GetSecureStorage.init(container: name, password: _password);
     _cold = GetSecureStorage(container: name);
   }
@@ -197,8 +204,8 @@ class GetStorageAdapter extends StorageAdapter {
 
   @override
   Future<void> open() async {
-    await GetStorage.init('bench_gs');
-    _box = GetStorage('bench_gs');
+    await GetStorage.init('${storagePrefix}_gs');
+    _box = GetStorage('${storagePrefix}_gs');
   }
 
   int _coldCount = 0;
@@ -207,8 +214,8 @@ class GetStorageAdapter extends StorageAdapter {
 
   @override
   Future<void> openCold() async {
-    final name = _coldName = 'bench_gs_cold${_coldCount++}';
-    await copyStore('bench_gs', name, '.gs');
+    final name = _coldName = '${storagePrefix}_gs_cold${_coldCount++}';
+    await copyStore('${storagePrefix}_gs', name, '.gs');
     await GetStorage.init(name);
     _cold = GetStorage(name);
   }
@@ -263,7 +270,7 @@ class HiveAdapter extends StorageAdapter {
   Future<void> open() async {
     await (_init ??= Hive.initFlutter('storage_benchmark'));
     _box = await Hive.openBox<Object>(
-      encrypted ? 'bench_hive_enc' : 'bench_hive',
+      encrypted ? '${storagePrefix}_hive_enc' : '${storagePrefix}_hive',
       encryptionCipher: encrypted ? HiveAesCipher(_hiveKey) : null,
     );
   }
@@ -309,22 +316,22 @@ class SharedPreferencesAdapter extends StorageAdapter {
   @override
   Future<void> clear() async {
     for (final key
-        in _prefs.getKeys().where((k) => k.startsWith('bench_')).toList()) {
+        in _prefs.getKeys().where((k) => k.startsWith('${storagePrefix}_')).toList()) {
       await _prefs.remove(key);
     }
   }
 
   @override
   Future<void> write(String key, Object value) => switch (value) {
-    int v => _prefs.setInt('bench_$key', v),
-    double v => _prefs.setDouble('bench_$key', v),
-    String v => _prefs.setString('bench_$key', v),
+    int v => _prefs.setInt('${storagePrefix}_$key', v),
+    double v => _prefs.setDouble('${storagePrefix}_$key', v),
+    String v => _prefs.setString('${storagePrefix}_$key', v),
     // Maps are not supported: store them as JSON text, as apps do.
-    _ => _prefs.setString('bench_$key', jsonEncode(value)),
+    _ => _prefs.setString('${storagePrefix}_$key', jsonEncode(value)),
   };
   @override
   Future<Object?> read(String key) async =>
-      decodeIfJson(_prefs.get('bench_$key'));
+      decodeIfJson(_prefs.get('${storagePrefix}_$key'));
   @override
-  Future<void> delete(String key) => _prefs.remove('bench_$key');
+  Future<void> delete(String key) => _prefs.remove('${storagePrefix}_$key');
 }

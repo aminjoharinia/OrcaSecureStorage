@@ -6,6 +6,7 @@ import 'package:get/utils.dart';
 import 'package:webcrypto/webcrypto.dart' show fillRandomBytes;
 
 import 'codec.dart';
+import 'durability.dart';
 import 'sdk/flutter.dart' if (dart.library.ui) 'sdk/dart.dart';
 import 'storage/html.dart' if (dart.library.io) 'storage/io.dart';
 import 'value.dart';
@@ -40,7 +41,8 @@ class OrcaSecureStorage {
       List<int>? encryptionKey,
       String? path,
       Map<String, dynamic>? initialData,
-      bool migrateUnencrypted = false}) {
+      bool migrateUnencrypted = false,
+      Durability? durability}) {
     if (encryptionKey != null && encryptionKey.length != 32) {
       throw ArgumentError.value(
           encryptionKey.length, 'encryptionKey', 'must be 32 bytes (AES-256)');
@@ -55,6 +57,7 @@ class OrcaSecureStorage {
         if (path != null && path != open._path) 'path',
         if (migrateUnencrypted && !open._migrateUnencrypted)
           'migrateUnencrypted',
+        if (durability != null && durability != open._durability) 'durability',
       ];
       if (conflict.isNotEmpty) {
         throw StateError('Container "$container" is already open with a '
@@ -63,8 +66,8 @@ class OrcaSecureStorage {
       }
       return open;
     }
-    final instance = OrcaSecureStorage._internal(container, path,
-        initialData, password, migrateUnencrypted, encryptionKey);
+    final instance = OrcaSecureStorage._internal(container, path, initialData,
+        password, migrateUnencrypted, encryptionKey, durability ?? Durability.fsync);
     _sync[container] = instance;
     return instance;
   }
@@ -82,8 +85,10 @@ class OrcaSecureStorage {
       Map<String, dynamic>? initialData,
       String? password,
       bool migrateUnencrypted = false,
-      List<int>? encryptionKey])
+      List<int>? encryptionKey,
+      Durability durability = Durability.fsync])
       : _password = password,
+        _durability = durability,
         _key = encryptionKey == null ? null : List<int>.of(encryptionKey),
         _path = path,
         _migrateUnencrypted = migrateUnencrypted {
@@ -112,6 +117,7 @@ class OrcaSecureStorage {
   final List<int>? _key;
   final String? _path;
   final bool _migrateUnencrypted;
+  final Durability _durability;
 
   /// No longer used; await [flush] to wait for saves.
   @Deprecated('Not used by OrcaSecureStorage any more.')
@@ -130,17 +136,22 @@ class OrcaSecureStorage {
   /// opened. When encrypted, a file that is not encrypted is rejected
   /// (kept aside as `<container>.oss.rejected`) unless [migrateUnencrypted] is
   /// true, in which case it is loaded and encrypted.
+  ///
+  /// [durability] (files only) decides whether saves are fsynced before they
+  /// count as saved: [Durability.fsync] (the default) or [Durability.os].
   static Future<bool> init(
       {String container = defaultContainer,
       String? password,
       List<int>? encryptionKey,
-      bool migrateUnencrypted = false}) {
+      bool migrateUnencrypted = false,
+      Durability? durability}) {
     initImpl();
     return OrcaSecureStorage(
             container: container,
             password: password,
             encryptionKey: encryptionKey,
-            migrateUnencrypted: migrateUnencrypted)
+            migrateUnencrypted: migrateUnencrypted,
+            durability: durability)
         .initStorage;
   }
 
@@ -151,7 +162,7 @@ class OrcaSecureStorage {
       StorageImpl.deleteContainer(container, path);
 
   Future<void> _init(StorageCodecConfig config) async {
-    await _concrete.init(_initialData, config);
+    await _concrete.init(_initialData, config, _durability);
   }
 
   /// Reads a value in your container with the given key.
@@ -237,13 +248,16 @@ class OrcaSecureStorage {
     return _tryFlush();
   }
 
-  /// Completes when every change made so far is saved (for files: fsynced).
-  /// Saves anything not saved yet, including changes whose save failed
-  /// earlier. Throws if saving fails; the changes stay in memory and are
-  /// tried again with the next write or [flush].
+  /// Completes when every change made so far is saved (for files: fsynced,
+  /// unless opened with [Durability.os]; on the web: stored right away
+  /// instead of after the usual short delay). Saves anything not saved yet,
+  /// including changes whose save failed earlier. Throws if saving fails;
+  /// the changes stay in memory and are tried again with the next write or
+  /// [flush].
   Future<void> flush() async {
     // Errors from earlier saves are superseded by this attempt.
     _saveError = null;
+    _concrete.saveNow();
     // Schedule a save even if one looks pending: `queue.cancelAllJobs()` can
     // drop a queued save without clearing the flag.
     _saveScheduled = false;

@@ -1,5 +1,16 @@
 import 'dart:convert';
 
+/// Prefix of every container, box, database and key name the benchmark
+/// uses. The memory benchmark's child processes use their own, so they never
+/// open files (or file locks, like Hive's) that the app itself still has
+/// open from a timing run.
+String storagePrefix = 'bench';
+
+/// A database file name under [storagePrefix]; the timing run keeps its
+/// original name.
+String benchFileName(String name) =>
+    storagePrefix == 'bench' ? name : '${storagePrefix}_$name';
+
 /// One storage under test. Values are ints, doubles, strings or JSON maps;
 /// every call is awaited one by one, the way app code usually uses these APIs.
 abstract class StorageAdapter {
@@ -9,7 +20,7 @@ abstract class StorageAdapter {
   /// Short label under the chart bars.
   String get label;
 
-  /// Package, e.g. `orca_secure_storage 2.1.8`.
+  /// Package, e.g. `orca_secure_storage 2.2.0`.
   String get package;
 
   /// `none`, or the cipher / mechanism used.

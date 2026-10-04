@@ -28,7 +28,7 @@ dependencies:
   orca_secure_storage:
     git:
       url: https://github.com/aminjoharinia/OrcaSecureStorage.git
-      ref: v2.1.8
+      ref: v2.2.0
 ```
 ### Install it
 
@@ -83,6 +83,45 @@ for files written with a password.
 
 `write` returns before the data reaches disk; `await box.flush()` waits until
 it is saved.
+
+### Durability: what "saved" means
+By default every save is fsynced before it counts as saved (before `flush()`
+completes). For apps that would rather save faster and can lose the last few
+changes after an OS crash or power loss, choose `Durability.os` when opening:
+```dart
+await OrcaSecureStorage.init(encryptionKey: key, durability: Durability.os);
+```
+
+| | `Durability.fsync` (default) | `Durability.os` |
+|---|---|---|
+| App crash, app killed | nothing saved is lost | nothing saved is lost (the OS still writes it) |
+| OS crash, power loss | nothing saved is lost | the latest saves can be lost; the container goes back to an earlier state |
+| Damaged container | never | never: snapshots are still fsynced and replaced atomically, and a half-written change is detected and ignored |
+| Cost of a save | one fsync of the change log | none |
+
+How much the fsync costs depends on the device. On a Mac it is cheap, because
+on Apple platforms `fsync` hands the data to the drive without flushing the
+drive's own cache: in the [benchmark](benchmarkapp/results/2026-10-04_durability.md)
+(10,000 strings, release build) writing everything took 24.7 ms with fsync
+and 25.5 ms without, and an update took 0.1 ms either way. On Android phones
+an fsync typically takes milliseconds, which is where `Durability.os` saves
+the most (not measured here).
+
+What other storages mean by "saved":
+
+| Storage | A save is done when the data is | Survives a power loss |
+|---|---|---|
+| OrcaSecureStorage, `Durability.fsync` | fsynced to disk | yes |
+| OrcaSecureStorage, `Durability.os` | handed to the OS | not the latest saves |
+| Hive CE, Sembast, GetStorage | written to the file, without fsync | not the latest saves |
+| SharedPreferences | handed to the platform (on Apple platforms `NSUserDefaults`, which writes later) | not the latest saves |
+| sqflite | committed by SQLite, which syncs to disk on commit by default | yes, with SQLite's default settings |
+
+On the web, data goes to `localStorage` and the browser decides when it
+reaches disk; `durability` has no effect there. Each save encrypts and
+stores the whole container, so a save waits 75 ms for more writes to join
+it: a burst of writes is stored once. `await box.flush()` stores at once, and
+so does hiding the tab (switching away or closing it).
 
 ### How it works (and its memory use)
 A container lives in memory twice, on purpose:

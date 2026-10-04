@@ -48,7 +48,7 @@ const _minLogBytesBeforeCompaction = 64 * 1024;
 
 class WorkerInit {
   WorkerInit(this.replyTo, this.mainPath, this.backupPath, this.logPath, this.legacyPaths,
-      this.config);
+      this.config, {this.fsyncLog = true});
   final SendPort replyTo;
   final String mainPath;
   final String backupPath;
@@ -58,6 +58,10 @@ class WorkerInit {
   /// is no current file yet.
   final List<String> legacyPaths;
   final StorageCodecConfig config;
+
+  /// fsync each change-log append before acknowledging it ([Durability.fsync]).
+  /// Snapshots are fsynced either way.
+  final bool fsyncLog;
 }
 
 /// First message from the worker.
@@ -434,7 +438,9 @@ class _Worker {
     final record = await _codec.encodeLogRecord(_payload(set, del), fingerprint, _seq);
     try {
       await log.writeFrom(record);
-      await log.flush(); // fsync: durable before the write is acknowledged
+      // fsync: durable before the write is acknowledged. With
+      // Durability.os the OS writes it when it likes.
+      if (init.fsyncLog) await log.flush();
     } catch (_) {
       // The log may now end in a partial record. Don't append after it:
       // write everything as a new snapshot instead.

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:get/get.dart';
 import 'package:web/web.dart' as web;
 import 'package:orca_secure_storage/orca_secure_storage.dart';
@@ -23,6 +24,18 @@ class StorageImpl {
   // Set by every change; a flush with nothing new to save does nothing.
   bool _dirty = false;
 
+  /// How long a save waits for more writes to join it. Each save encrypts
+  /// and stores the whole container, so a burst of writes is saved once.
+  static const saveDelay = Duration(milliseconds: 75);
+
+  Timer? _delay;
+  Completer<void>? _waiting;
+  bool _now = false;
+
+  // Kept for the container's lifetime; saves at once when the tab is hidden.
+  // ignore: unused_field
+  AppLifecycleListener? _lifecycle;
+
   void clear() {
     _dirty = true;
     localStorage.removeItem(fileName);
@@ -42,12 +55,18 @@ class StorageImpl {
   }
 
   //^ Each flush rewrites the whole container, so a burst of writes awaited
-  //^ one by one used to rewrite it once per write (quadratic). Waiting one
-  //^ event-loop turn lets the burst finish first; the flushes queued behind
-  //^ this one then find nothing dirty and return.
+  //^ one by one used to rewrite it once per write (quadratic). Waiting
+  //^ [saveDelay] lets the burst finish first; the flushes queued behind this
+  //^ one then find nothing dirty and return. [saveNow] cuts the wait short.
   Future<void> flush() async {
     if (!_dirty) return;
-    await Future<void>.delayed(Duration.zero);
+    if (!_now) {
+      final waiting = _waiting = Completer<void>();
+      _delay = Timer(saveDelay, waiting.complete);
+      await waiting.future;
+      _waiting = null;
+    }
+    _now = false;
     if (!_dirty) return;
     _dirty = false;
     try {
@@ -56,6 +75,16 @@ class StorageImpl {
       _dirty = true;
       rethrow;
     }
+  }
+
+  /// Stores pending changes without waiting for [saveDelay]: for an
+  /// explicit `flush()`, and when the tab is hidden (it may be closing).
+  void saveNow() {
+    if (!_dirty && _waiting == null) return;
+    _now = true;
+    _delay?.cancel();
+    final waiting = _waiting;
+    if (waiting != null && !waiting.isCompleted) waiting.complete();
   }
 
   T? read<T>(String key) {
@@ -74,8 +103,15 @@ class StorageImpl {
   /// it dirty is enough.
   void markAllDirty() => _dirty = true;
 
-  Future<void> init(Map<String, dynamic>? initialData, StorageCodecConfig config) async {
+  Future<void> init(Map<String, dynamic>? initialData, StorageCodecConfig config,
+      Durability durability) async {
+    // localStorage has no fsync; the browser decides when it reaches disk.
     _codec = StorageCodec(config);
+    try {
+      _lifecycle = AppLifecycleListener(onHide: saveNow, onPause: saveNow);
+    } catch (_) {
+      // No Flutter binding (plain Dart): saves still happen after the delay.
+    }
     subject.value = initialData ?? <String, dynamic>{};
     if (await _exists()) {
       await _readFromStorage();

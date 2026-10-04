@@ -20,7 +20,7 @@ class SembastAdapter extends StorageAdapter {
   String get encryption => 'none';
 
   @override
-  Future<void> open() async => _db = await openSembast('storage_benchmark.db');
+  Future<void> open() async => _db = await openSembast(benchFileName('storage_benchmark.db'));
 
   // Cold read: close the database and open it again (reloads the file).
   @override
