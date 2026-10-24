@@ -4,8 +4,8 @@ An encrypted, fast key-value store for Flutter, with WASM support. The data
 lives in memory and is saved to disk after each change.
 
 Based on [get_secure_storage](https://github.com/gslender/get_secure_storage) by
-gslender, itself a secure version of [GetStorage](https://github.com/jonataslaw/get_storage)
-by Jonny Borges.
+gslender and [get_storage](https://github.com/jonataslaw/get_storage) by Jonny
+Borges.
 
 - **Encryption:** AES-256-GCM, key derived with PBKDF2-HMAC-SHA256 (600,000
   iterations, random salt per container), through BoringSSL
